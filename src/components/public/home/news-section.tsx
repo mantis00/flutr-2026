@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useId, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+const PREVIEW_LENGTH = 280;
+
+function getPreview(content: string) {
+  if (content.length <= PREVIEW_LENGTH) return content;
+
+  const lastSpace = content.lastIndexOf(" ", PREVIEW_LENGTH);
+  const end = lastSpace > 0 ? lastSpace : PREVIEW_LENGTH;
+  return `${content.slice(0, end).trimEnd()}...`;
+}
 
 interface NewsSectionProps {
   title: string;
@@ -12,26 +23,8 @@ interface NewsSectionProps {
 }
 
 export function NewsSection({ title, content, image_url, created_at }: NewsSectionProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [hasOverflow, setHasOverflow] = useState(false);
-  const contentRef = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    const element = contentRef.current;
-    if (!element) return;
-
-    const updateOverflow = () => {
-      if (!expanded) {
-        setHasOverflow(element.scrollHeight > element.clientHeight);
-      }
-    };
-
-    updateOverflow();
-    const observer = new ResizeObserver(updateOverflow);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [content, expanded]);
-
+  const [isExpanded, setIsExpanded] = useState(false);
+  const contentId = useId();
   const dateStr = created_at.toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -63,22 +56,22 @@ export function NewsSection({ title, content, image_url, created_at }: NewsSecti
         </CardHeader>
         <CardContent className="pb-6">
           <p
-            ref={contentRef}
-            id="news-content"
-            className={`text-muted-foreground text-sm leading-relaxed ${expanded ? "" : "line-clamp-4"}`}
+            id={contentId}
+            aria-live="polite"
+            className="text-muted-foreground text-sm leading-relaxed"
           >
-            {content}
+            {isExpanded ? content : getPreview(content)}
           </p>
-          {hasOverflow && (
-            <button
-              type="button"
-              aria-controls="news-content"
-              aria-expanded={expanded}
-              className="text-primary focus-visible:outline-ring mt-2 text-sm font-medium underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2"
-              onClick={() => setExpanded((current) => !current)}
+          {content.length > PREVIEW_LENGTH && (
+            <Button
+              aria-controls={contentId}
+              aria-expanded={isExpanded}
+              className="mt-2 h-auto p-0"
+              onClick={() => setIsExpanded((expanded) => !expanded)}
+              variant="link"
             >
-              {expanded ? "Show less" : "Show more"}
-            </button>
+              {isExpanded ? "Show less" : "Show more"}
+            </Button>
           )}
         </CardContent>
       </Card>
