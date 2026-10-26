@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 const PREVIEW_LENGTH = 280;
 
-function getPreview(content: string) {
+export function getPreview(content: string) {
   if (content.length <= PREVIEW_LENGTH) return content;
 
   const lastSpace = content.lastIndexOf(" ", PREVIEW_LENGTH);
@@ -29,6 +29,7 @@ export function NewsSection({ title, content, image_url, created_at }: NewsSecti
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 
   return (
@@ -55,11 +56,7 @@ export function NewsSection({ title, content, image_url, created_at }: NewsSecti
           </time>
         </CardHeader>
         <CardContent className="pb-6">
-          <p
-            id={contentId}
-            aria-live="polite"
-            className="text-muted-foreground text-sm leading-relaxed"
-          >
+          <p id={contentId} className="text-muted-foreground text-sm leading-relaxed">
             {isExpanded ? content : getPreview(content)}
           </p>
           {content.length > PREVIEW_LENGTH && (
