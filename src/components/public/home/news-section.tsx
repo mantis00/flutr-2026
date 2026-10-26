@@ -1,5 +1,19 @@
+"use client";
+
 import Image from "next/image";
+import { useId, useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+const PREVIEW_LENGTH = 280;
+
+export function getPreview(content: string) {
+  if (content.length <= PREVIEW_LENGTH) return content;
+
+  const lastSpace = content.lastIndexOf(" ", PREVIEW_LENGTH);
+  const end = lastSpace > 0 ? lastSpace : PREVIEW_LENGTH;
+  return `${content.slice(0, end).trimEnd()}...`;
+}
 
 interface NewsSectionProps {
   title: string;
@@ -9,10 +23,13 @@ interface NewsSectionProps {
 }
 
 export function NewsSection({ title, content, image_url, created_at }: NewsSectionProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const contentId = useId();
   const dateStr = created_at.toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: "UTC",
   });
 
   return (
@@ -22,13 +39,13 @@ export function NewsSection({ title, content, image_url, created_at }: NewsSecti
       </h2>
       <Card className="overflow-hidden py-0">
         {image_url && (
-          <div className="relative aspect-video w-full">
+          <div className="bg-muted relative aspect-[4/3] w-full">
             <Image
               src={image_url}
               alt=""
               fill
-              sizes="(min-width: 1024px) 66vw, (min-width: 768px) 80vw, 100vw"
-              className="object-cover"
+              sizes="(min-width: 1024px) 40vw, (min-width: 768px) 80vw, 100vw"
+              className="object-contain"
               unoptimized
             />
           </div>
@@ -39,7 +56,20 @@ export function NewsSection({ title, content, image_url, created_at }: NewsSecti
           </time>
         </CardHeader>
         <CardContent className="pb-6">
-          <p className="text-muted-foreground line-clamp-4 text-sm leading-relaxed">{content}</p>
+          <p id={contentId} className="text-muted-foreground text-sm leading-relaxed">
+            {isExpanded ? content : getPreview(content)}
+          </p>
+          {content.length > PREVIEW_LENGTH && (
+            <Button
+              aria-controls={contentId}
+              aria-expanded={isExpanded}
+              className="mt-2 h-auto p-0"
+              onClick={() => setIsExpanded((expanded) => !expanded)}
+              variant="link"
+            >
+              {isExpanded ? "Show less" : "Show more"}
+            </Button>
+          )}
         </CardContent>
       </Card>
     </section>

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublicInstitution } from "@/lib/queries/institution";
 import { getInstitutionHomeData, getPublicNewsPreview } from "@/lib/queries/home";
@@ -11,6 +12,39 @@ export const dynamic = "force-dynamic";
 
 interface InstitutionPageProps {
   params: Promise<{ institution: string }>;
+}
+
+export async function generateMetadata({ params }: InstitutionPageProps): Promise<Metadata> {
+  const { institution: slug } = await params;
+  const inst = await getPublicInstitution(slug);
+
+  if (!inst) return { title: "Butterfly House" };
+
+  const news = await getPublicNewsPreview(inst.id);
+  const description = (
+    inst.description ||
+    news?.content ||
+    `Discover butterflies at ${inst.name}.`
+  ).slice(0, 200);
+  const image = news?.image_url ?? inst.facility_image_url;
+  const images = image ? [{ url: image }] : undefined;
+
+  return {
+    title: `${inst.name} | Butterfly House`,
+    description,
+    openGraph: {
+      title: inst.name,
+      description,
+      type: "website",
+      images,
+    },
+    twitter: {
+      card: images ? "summary_large_image" : "summary",
+      title: inst.name,
+      description,
+      images,
+    },
+  };
 }
 
 export default async function InstitutionPage({ params }: InstitutionPageProps) {
