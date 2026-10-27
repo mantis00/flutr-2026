@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 jest.mock("@/lib/services/tenant-shipments", () => ({
   SHIPMENT_ERRORS: {
     CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
+    GOOD_EMERGENCE_EXCEEDS_AVAILABLE: "GOOD_EMERGENCE_EXCEEDS_AVAILABLE",
     INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
     SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
   },
@@ -249,6 +250,50 @@ describe("Shipments API", () => {
       expect((await response.json()).error.code).toBe("INVALID_REQUEST");
     });
 
+    it("rejects creation when all six loss categories exceed number received", async () => {
+      const payload = validCreatePayload();
+      payload.items[0] = {
+        ...payload.items[0],
+        number_received: 6,
+        emerged_in_transit: 2,
+        damaged_in_transit: 1,
+        diseased_in_transit: 1,
+        parasite: 1,
+        non_emergence: 1,
+        poor_emergence: 1,
+      };
+
+      const response = (await postShipment(makePostRequest(payload, SLUG)))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.details).toContainEqual({
+        path: "items[0].number_received",
+        message: "Total losses cannot exceed number received",
+      });
+      expect(mockCreateTenantShipment).not.toHaveBeenCalled();
+    });
+
+    it("permits creation when all six loss categories exactly equal number received", async () => {
+      const payload = validCreatePayload();
+      payload.items[0] = {
+        ...payload.items[0],
+        number_received: 6,
+        emerged_in_transit: 1,
+        damaged_in_transit: 1,
+        diseased_in_transit: 1,
+        parasite: 1,
+        non_emergence: 1,
+        poor_emergence: 1,
+      };
+      mockCreateTenantShipment.mockResolvedValueOnce(42);
+
+      const response = (await postShipment(makePostRequest(payload, SLUG)))!;
+
+      expect(response.status).toBe(201);
+      expect(mockCreateTenantShipment).toHaveBeenCalledTimes(1);
+    });
+
     it.each([
       ["shipment_date", "2026-09-09-garbage"],
       ["arrival_date", "2026-09-09T25:00:00Z"],
@@ -422,6 +467,67 @@ describe("Shipments API", () => {
       expect((await response.json()).error.code).toBe("INVALID_REQUEST");
     });
 
+    it("rejects an added item when combined losses exceed number received", async () => {
+      const response = (await patchShipmentById(
+        makePatchRequest(
+          "7",
+          {
+            add_items: [
+              {
+                butterfly_species_id: 10,
+                number_received: 6,
+                emerged_in_transit: 2,
+                damaged_in_transit: 1,
+                diseased_in_transit: 1,
+                parasite: 1,
+                non_emergence: 1,
+                poor_emergence: 1,
+              },
+            ],
+          },
+          SLUG,
+        ),
+        routeContext("7"),
+      ))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.details).toContainEqual({
+        path: "add_items[0].number_received",
+        message: "Total losses cannot exceed number received",
+      });
+      expect(mockUpdateTenantShipment).not.toHaveBeenCalled();
+    });
+
+    it("permits an added item when combined losses exactly equal number received", async () => {
+      mockUpdateTenantShipment.mockResolvedValueOnce(true);
+
+      const response = (await patchShipmentById(
+        makePatchRequest(
+          "7",
+          {
+            add_items: [
+              {
+                butterfly_species_id: 10,
+                number_received: 6,
+                emerged_in_transit: 1,
+                damaged_in_transit: 1,
+                diseased_in_transit: 1,
+                parasite: 1,
+                non_emergence: 1,
+                poor_emergence: 1,
+              },
+            ],
+          },
+          SLUG,
+        ),
+        routeContext("7"),
+      ))!;
+
+      expect(response.status).toBe(200);
+      expect(mockUpdateTenantShipment).toHaveBeenCalledTimes(1);
+    });
+
     it.each([
       ["shipment_date", "2026-09-09-garbage"],
       ["arrival_date", "2026-09-09T25:00:00Z"],
@@ -517,6 +623,37 @@ describe("Shipments API", () => {
       ))!;
       expect(response.status).toBe(409);
       expect((await response.json()).error.code).toBe("CONFLICT");
+    });
+
+    it("returns a clear 409 when aggregate Released exceeds post-edit availability", async () => {
+      mockUpdateTenantShipment.mockRejectedValueOnce(new Error("GOOD_EMERGENCE_EXCEEDS_AVAILABLE"));
+
+      const response = (await patchShipmentById(
+        makePatchRequest(
+          "7",
+          {
+            update_items: [
+              {
+                id: 1,
+                number_received: 5,
+                emerged_in_transit: 0,
+                damaged_in_transit: 0,
+                diseased_in_transit: 0,
+                parasite: 0,
+                non_emergence: 0,
+                poor_emergence: 0,
+              },
+            ],
+          },
+          SLUG,
+        ),
+        routeContext("7"),
+      ))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.message).toBe("Released cannot exceed number received minus total losses");
     });
 
     it("returns 404 when update_items references an item not in this shipment", async () => {

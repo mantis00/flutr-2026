@@ -79,32 +79,29 @@ describe("calculateRemaining", () => {
   });
 });
 
-describe("N+1 fix: bulk sum minus existing quantity coercion", () => {
-  // Tests the arithmetic invariant of the updateReleaseEventItems N+1 fix:
-  // alreadyReleased = totalForItem - existingRowQuantity
-  it("computes correct alreadyReleased when other rows exist", () => {
-    const totalReleased = 50; // all in_flight rows for this shipment_item
-    const existingQuantity = 20; // the row being updated
-    const alreadyReleased = totalReleased - existingQuantity;
+describe("authoritative aggregate minus the edited event's existing quantity", () => {
+  it("preserves a positive baseline outside the edited event", () => {
+    const goodEmergence = 50;
+    const existingEventQuantity = 20;
+    const alreadyReleased = goodEmergence - existingEventQuantity;
     expect(alreadyReleased).toBe(30);
     expect(calculateRemaining({ ...baseItem, number_received: 100 }, alreadyReleased)).toBe(70);
   });
 
-  it("computes 0 alreadyReleased when only one row and it is the one being updated", () => {
-    const totalReleased = 20; // only row is the existing row
-    const existingQuantity = 20;
-    const alreadyReleased = totalReleased - existingQuantity;
+  it("preserves a zero baseline when aggregate and event quantity match", () => {
+    const goodEmergence = 20;
+    const existingEventQuantity = 20;
+    const alreadyReleased = goodEmergence - existingEventQuantity;
     expect(alreadyReleased).toBe(0);
     expect(calculateRemaining(baseItem, alreadyReleased)).toBe(100);
   });
 
-  it("coerces to 0 for items with no in_flight rows (default fallback)", () => {
-    // When no in_flight row exists for a shipment_item_id, the grouped query
-    // returns no row; the map lookup returns undefined and falls back to 0.
-    const totalReleased = 0;
-    const existingQuantity = 0;
-    const alreadyReleased = totalReleased - existingQuantity;
-    expect(alreadyReleased).toBe(0);
+  it("preserves a negative baseline when the event exceeds a manually adjusted aggregate", () => {
+    const goodEmergence = 15;
+    const existingEventQuantity = 20;
+    const alreadyReleased = goodEmergence - existingEventQuantity;
+    expect(alreadyReleased).toBe(-5);
+    expect(calculateRemaining(baseItem, alreadyReleased)).toBe(105);
   });
 });
 

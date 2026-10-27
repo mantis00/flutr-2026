@@ -17,7 +17,8 @@ import {
   type ReleaseCategory,
 } from "@/components/tenant/releases/release-category-composer";
 import {
-  computeItemRemaining,
+  computeItemReleaseCap,
+  isGoodEmergenceTracked,
   type ShipmentDetailResponse,
   type ShipmentItemRow,
 } from "@/components/tenant/shipments/types";
@@ -113,8 +114,19 @@ export default function CreateReleasePage() {
       return "Set at least one category quantity before saving.";
     }
     for (const item of data.items) {
+      // Defensive mirror of the stepper cap (which already blocks this via
+      // the category composer): Good Emergence can never be allocated
+      // against an item whose Released total is historically untracked — the
+      // server rejects it with GOOD_EMERGENCE_UNTRACKED. Checked explicitly,
+      // and before the generic cap check, so the message is specific rather
+      // than a generic "allocated X but only Y remain."
+      const goodEmergenceAllocated = values[item.id]?.goodEmergence ?? 0;
+      if (goodEmergenceAllocated > 0 && !isGoodEmergenceTracked(item)) {
+        return `${item.commonName}: Released is unknown for this historical species, so a release quantity can't be recorded.`;
+      }
+
       const allocated = sumCategories(values[item.id]);
-      const cap = computeItemRemaining(item);
+      const cap = computeItemReleaseCap(item);
       if (allocated > cap) {
         return `${item.commonName}: allocated ${allocated} but only ${cap} remain.`;
       }

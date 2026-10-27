@@ -295,6 +295,21 @@ Response shape:
 }
 ```
 
+Each item includes both `goodEmergence` and `inFlightQuantity`.
+`goodEmergence` is the authoritative aggregate for shipment Released summaries,
+per-item Released displays, Remaining/completion, and release capacity.
+`inFlightQuantity` is the event-backed sum used for release history and physical-
+inventory edit/delete guards. The values may legitimately differ; neither is
+recomputed from the other.
+
+Shipment list and detail `remaining`/`isCompleted` are computed from
+`goodEmergence`, not `in_flight`: `remaining = number_received - losses -
+good_emergence`, clamped at 0. A `null` `goodEmergence` means Released is unknown,
+not zero; it displays as Unknown and forces that item's Remaining to 0/complete.
+If any shipment item is unknown, the shipment-level Released summary is also
+Unknown. Direct `goodEmergence` editing is not part of the current shipment PATCH
+contract.
+
 ### DELETE /api/tenant/shipments/[id]
 
 Requires `DELETE_SHIPMENT` (ADMIN or SUPERUSER); EMPLOYEE receives `403 FORBIDDEN`.
@@ -307,7 +322,20 @@ Release mutation note: current operational `shipment_items.good_emergence` value
 are numeric and new rows default to `0`. The nullable column reserves `NULL` for
 historical rows whose Released total was not tracked; future historical-import work
 will introduce that state explicitly. `NULL` is distinct from tracked `0`, and
-release mutations reject a row if its `good_emergence` is `NULL`.
+release-quantity mutations reject a row if its `good_emergence` is `NULL`. Current
+historical import/export endpoints do not yet implement aggregate Released/unknown
+mapping; that work is deferred.
+
+Capacity validation note: release create/update endpoints (and the
+`in_flight` create/update endpoints below) compute "already released" capacity
+from the target row's `good_emergence` rather than summing `in_flight`. Release
+mutations apply the same signed event delta to both stores, preserving any existing
+historical/manual baseline; they do not require equality or recompute the aggregate
+from event rows. For capacity purposes only, `NULL` `good_emergence` is treated as
+`0` already-released — not the same as the "remaining = 0" display rule above —
+which preserves the ability to apply loss-only corrections to historical rows. Any
+attempt to change a release quantity against such a row is still rejected as
+`GOOD_EMERGENCE_UNTRACKED`.
 
 ### Tenant releases list contract
 
@@ -344,6 +372,10 @@ Response shape:
 
 Returns `400 INVALID_REQUEST` for non-numeric `page` / `limit` values or
 `limit` > 200.
+
+`totalReleased` in this release-event list is the event-backed `in_flight` total for
+that release. It is intentionally independent of the shipment's aggregate
+`good_emergence` Released value.
 
 ### Tenant release detail contract
 

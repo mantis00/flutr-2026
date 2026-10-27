@@ -97,6 +97,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return conflict("Cannot delete a shipment item that has in-flight records");
     }
 
+    if (
+      error instanceof Error &&
+      error.message === SHIPMENT_ERRORS.GOOD_EMERGENCE_EXCEEDS_AVAILABLE
+    ) {
+      return conflict("Released cannot exceed number received minus total losses");
+    }
+
     if (error instanceof Error && error.message === SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION) {
       return conflict("Cannot reduce shipment quantities below already released butterflies");
     }

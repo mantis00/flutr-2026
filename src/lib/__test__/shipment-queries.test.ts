@@ -27,6 +27,7 @@ import {
   updateShipment,
 } from "@/lib/queries/shipments";
 import { ensureSpeciesLinksForInstitution } from "@/lib/queries/species";
+import type { UpdateShipmentBody } from "@/lib/validation/shipments";
 import { createThenableQuery } from "@/__test__/api/_utils/mockDb";
 import { type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -82,6 +83,40 @@ function createDeleteStub() {
   });
 
   return { deleteMock, deleteOrder };
+}
+
+function updateItemPayload(
+  overrides: Partial<NonNullable<UpdateShipmentBody["update_items"]>[number]> = {},
+) {
+  return {
+    id: 7,
+    number_received: 10,
+    emerged_in_transit: 0,
+    damaged_in_transit: 0,
+    diseased_in_transit: 0,
+    parasite: 0,
+    non_emergence: 0,
+    poor_emergence: 0,
+    ...overrides,
+  };
+}
+
+function buildItemUpdateTx(goodEmergence: number | null, inFlightTotal: number) {
+  const itemUpdateWhere = jest.fn().mockResolvedValue(undefined);
+  const itemUpdateSet = jest.fn(() => ({ where: itemUpdateWhere }));
+  const tx = {
+    select: jest.fn(),
+    insert: jest.fn(),
+    update: jest.fn(() => ({ set: itemUpdateSet })),
+    delete: jest.fn(),
+  };
+
+  tx.select
+    .mockImplementationOnce(() => createThenableQuery([{ id: 55 }]))
+    .mockImplementationOnce(() => createLockableQuery([{ id: 7, goodEmergence }]))
+    .mockImplementationOnce(() => createThenableQuery([{ total: inFlightTotal }]));
+
+  return { tx, itemUpdateSet };
 }
 
 describe("shipment queries", () => {
@@ -204,36 +239,126 @@ describe("shipment queries", () => {
   });
 
   it("counts emerged_in_transit when preventing inventory reductions below released total", async () => {
-    const tx = {
-      select: jest.fn(),
-      insert: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    };
-
-    tx.select
-      .mockImplementationOnce(() => createThenableQuery([{ id: 55 }]))
-      .mockImplementationOnce(() => createLockableQuery([{ id: 7 }]))
-      .mockImplementationOnce(() => createThenableQuery([{ total: 5 }]));
+    const { tx } = buildItemUpdateTx(0, 5);
 
     mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
 
     await expect(
       updateShipment(77, 55, {
         update_items: [
-          {
-            id: 7,
+          updateItemPayload({
             number_received: 8,
             emerged_in_transit: 2,
-            damaged_in_transit: 0,
-            diseased_in_transit: 0,
-            parasite: 0,
-            non_emergence: 0,
             poor_emergence: 2,
-          },
+          }),
         ],
       }),
     ).rejects.toThrow(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);
+  });
+
+  it("rejects an item edit when numeric Good Emergence exceeds post-edit availability", async () => {
+    const { tx } = buildItemUpdateTx(6, 4);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [updateItemPayload({ number_received: 5 })],
+      }),
+    ).rejects.toThrow(SHIPMENT_ERRORS.GOOD_EMERGENCE_EXCEEDS_AVAILABLE);
+  });
+
+  it("independently rejects an item edit when event-backed quantity exceeds availability", async () => {
+    const { tx } = buildItemUpdateTx(4, 6);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [updateItemPayload({ number_received: 5 })],
+      }),
+    ).rejects.toThrow(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);
+  });
+
+  it("permits divergent Good Emergence and event totals when post-edit availability covers both", async () => {
+    const { tx, itemUpdateSet } = buildItemUpdateTx(8, 5);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [
+          updateItemPayload({
+            number_received: 10,
+            emerged_in_transit: 1,
+            damaged_in_transit: 1,
+          }),
+        ],
+      }),
+    ).resolves.toBe(true);
+
+    expect(itemUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        number_received: 10,
+        emerged_in_transit: 1,
+        damaged_in_transit: 1,
+      }),
+    );
+  });
+
+  it("retains the event-backed guard when Good Emergence is NULL", async () => {
+    const { tx } = buildItemUpdateTx(null, 6);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [updateItemPayload({ number_received: 5 })],
+      }),
+    ).rejects.toThrow(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);
+  });
+
+  it("accepts a fully accounted item with known zero Good Emergence", async () => {
+    const { tx } = buildItemUpdateTx(0, 0);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [
+          updateItemPayload({
+            number_received: 6,
+            emerged_in_transit: 1,
+            damaged_in_transit: 1,
+            diseased_in_transit: 1,
+            parasite: 1,
+            non_emergence: 1,
+            poor_emergence: 1,
+          }),
+        ],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("requires an edited legacy-invalid item to become fully valid", async () => {
+    const { tx } = buildItemUpdateTx(10, 0);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [updateItemPayload({ number_received: 9 })],
+      }),
+    ).rejects.toThrow(SHIPMENT_ERRORS.GOOD_EMERGENCE_EXCEEDS_AVAILABLE);
+  });
+
+  it("allows a header-only update without inspecting unrelated legacy-invalid items", async () => {
+    const headerUpdateWhere = jest.fn().mockResolvedValue(undefined);
+    const headerUpdateSet = jest.fn(() => ({ where: headerUpdateWhere }));
+    const tx = {
+      select: jest.fn(() => createThenableQuery([{ id: 55 }])),
+      update: jest.fn(() => ({ set: headerUpdateSet })),
+    };
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(updateShipment(77, 55, { supplier_code: "SUP-2" })).resolves.toBe(true);
+
+    expect(tx.select).toHaveBeenCalledTimes(1);
+    expect(headerUpdateSet).toHaveBeenCalledWith({ supplier_code: "SUP-2" });
   });
 
   it("does not delete anything when the shipment is not in the tenant", async () => {

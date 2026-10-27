@@ -31,7 +31,12 @@ import {
 import { useSpeciesSearch, type SpeciesItem } from "@/hooks/use-species-search";
 import { cn } from "@/lib/utils";
 
-import { computeItemRemaining, type ShipmentItemRow } from "./types";
+import {
+  computeItemEditReserve,
+  computeItemRemaining,
+  formatReleasedQuantity,
+  type ShipmentItemRow,
+} from "./types";
 
 type LossField =
   | "emergedInTransit"
@@ -61,9 +66,10 @@ const METRIC_COLUMNS: MetricColumn[] = [
 
 /**
  * Loss columns that must satisfy
- * `sum(losses) + inFlightQuantity ≤ numberReceived` server-side. Mirroring
- * that constraint client-side gives better feedback (we clamp at the cap)
- * and matches the composer's per-species behavior.
+ * `sum(losses) + max(inFlightQuantity, goodEmergence ?? 0) ≤ numberReceived`
+ * server-side. Mirroring both independent constraints client-side gives
+ * better feedback (we clamp at the cap) and matches the composer's
+ * per-species behavior.
  */
 const LOSS_FIELDS: LossField[] = [
   "emergedInTransit",
@@ -87,23 +93,23 @@ interface ShipmentItemsTableProps {
 /**
  * Per-column maximum in edit mode.
  *
- * - `numberReceived` cannot drop below `inFlightQuantity + sum(losses)` or the
- *   PATCH API rejects it as an `INVALID_INVENTORY_REDUCTION`.
+ * - `numberReceived` cannot drop below the stricter of event-backed physical
+ *   inventory and aggregate Released, plus `sum(losses)`.
  * - Individual loss columns cannot push the total losses past
- *   `numberReceived - inFlightQuantity`. Clamping at this cap gives the user
- *   immediate feedback instead of a server error after Save.
+ *   `numberReceived - reserved`. Clamping at this cap gives the user immediate
+ *   feedback instead of a server error after Save.
  */
 function metricMaxFor(item: ShipmentItemRow, field: MetricKey): number | undefined {
   if (field === "numberReceived") return undefined;
 
   const otherLosses = LOSS_FIELDS.filter((k) => k !== field).reduce((acc, k) => acc + item[k], 0);
-  return Math.max(0, item.numberReceived - item.inFlightQuantity - otherLosses);
+  return Math.max(0, item.numberReceived - computeItemEditReserve(item) - otherLosses);
 }
 
 function metricMinFor(item: ShipmentItemRow, field: MetricKey): number {
   if (field !== "numberReceived") return 0;
   const totalLosses = LOSS_FIELDS.reduce((acc, k) => acc + item[k], 0);
-  return item.inFlightQuantity + totalLosses;
+  return computeItemEditReserve(item) + totalLosses;
 }
 
 type ItemSpeciesItem = SpeciesItem & ShipmentItemRow;
@@ -218,7 +224,9 @@ export function ShipmentItemsTable({
                       )}
                     </TableCell>
                   ))}
-                  <TableCell className="text-center text-sm">{item.inFlightQuantity}</TableCell>
+                  <TableCell className="text-center text-sm">
+                    {formatReleasedQuantity(item.goodEmergence)}
+                  </TableCell>
                   <TableCell
                     className={cn(
                       "text-center text-sm font-medium",
@@ -229,7 +237,7 @@ export function ShipmentItemsTable({
                       <span className="inline-flex items-center justify-center gap-1">
                         <CheckCircle2 className="size-4" aria-hidden="true" />
                         <span>0</span>
-                        <span className="sr-only"> (released)</span>
+                        <span className="sr-only"> (none remaining)</span>
                       </span>
                     ) : (
                       computeItemRemaining(item)
