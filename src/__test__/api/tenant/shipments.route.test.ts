@@ -268,7 +268,7 @@ describe("Shipments API", () => {
 
       expect(response.status).toBe(400);
       expect(body.error.details).toContainEqual({
-        path: "items[0].number_received",
+        path: "items[0]",
         message: "Total losses cannot exceed number received",
       });
       expect(mockCreateTenantShipment).not.toHaveBeenCalled();
@@ -493,7 +493,7 @@ describe("Shipments API", () => {
 
       expect(response.status).toBe(400);
       expect(body.error.details).toContainEqual({
-        path: "add_items[0].number_received",
+        path: "add_items[0]",
         message: "Total losses cannot exceed number received",
       });
       expect(mockUpdateTenantShipment).not.toHaveBeenCalled();

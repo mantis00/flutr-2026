@@ -607,6 +607,10 @@ export async function updateReleaseEventItems(
       number,
       Partial<LossValues> & { good_emergence?: number }
     >();
+    // Items whose loss columns actually changed in this edit — the
+    // independent physical in_flight floor below only needs to re-check
+    // these, since an untouched item's physical reality can't have shifted.
+    const lossChangedItemIds = new Set<number>();
 
     // Apply event-level loss deltas to shipment source-of-truth loss totals.
     for (const shipmentItemId of touchedItemIds) {
@@ -656,6 +660,9 @@ export async function updateReleaseEventItems(
       const lossChanged = LOSS_COLUMNS.some(
         (column) => nextLosses[column] !== originalLosses[column],
       );
+      if (lossChanged) {
+        lossChangedItemIds.add(shipmentItemId);
+      }
 
       // good_emergence mirrors the signed delta in this item's in_flight
       // quantity for this edit. Items with no in-flight change (delta === 0,
@@ -681,6 +688,35 @@ export async function updateReleaseEventItems(
       }
     }
 
+    // Independent physical in_flight safeguard: a loss correction on an item
+    // must not drop post-loss availability below butterflies genuinely
+    // already in flight across every release event for that item, even when
+    // that actual total diverges from the aggregate good_emergence baseline
+    // checked below. Queried once, grouped, only for items whose losses
+    // actually changed, inside the same transaction as the shipment_items
+    // row locks above so the totals read here are transactionally consistent
+    // with those locks.
+    const lossChangedIds = Array.from(lossChangedItemIds);
+    const inFlightTotalsForLossChanges =
+      lossChangedIds.length > 0
+        ? await tx
+            .select({
+              shipmentItemId: in_flight.shipment_item_id,
+              total: sql<number>`coalesce(sum(${in_flight.quantity}), 0)::int`.as("total"),
+            })
+            .from(in_flight)
+            .where(
+              and(
+                eq(in_flight.institution_id, institutionId),
+                inArray(in_flight.shipment_item_id, lossChangedIds),
+              ),
+            )
+            .groupBy(in_flight.shipment_item_id)
+        : [];
+    const inFlightTotalByShipmentItemId = new Map(
+      inFlightTotalsForLossChanges.map((row) => [row.shipmentItemId, row.total]),
+    );
+
     // Validate desired in-flight quantities against post-loss shipment state.
     // `good_emergence` on the already-locked row is the authoritative total
     // already released for this item; subtracting this event's own existing
@@ -699,6 +735,14 @@ export async function updateReleaseEventItems(
 
       if (desiredEventInFlight > remaining) {
         throw new Error(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+      }
+
+      if (lossChangedItemIds.has(shipmentItemId)) {
+        const totalInFlight = inFlightTotalByShipmentItemId.get(shipmentItemId) ?? 0;
+        const projectedInFlightTotal = totalInFlight - existingEventInFlight + desiredEventInFlight;
+        if (calculateRemaining(locked, projectedInFlightTotal) < 0) {
+          throw new Error(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+        }
       }
     }
 
@@ -961,11 +1005,51 @@ export async function createReleaseFromShipment(
     //
     // Guard against loss corrections that would push a non-released item's
     // remaining below zero (i.e. losses + good_emergence > number_received).
+    // This is independent from the actual physical in_flight floor checked
+    // immediately below — good_emergence and in_flight can legitimately
+    // diverge, so neither bound substitutes for the other.
     for (const update of lossUpdates) {
       const row = lockedMutableItems.get(update.shipment_item_id);
       if (!row) continue;
       const alreadyReleased = row.good_emergence ?? 0;
       if (calculateRemaining(row, alreadyReleased) < 0) {
+        throw new Error(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+      }
+    }
+
+    // Independent physical in_flight safeguard: a loss correction must not
+    // drop post-loss availability below butterflies genuinely already in
+    // flight across every release event for that item, even when the actual
+    // in_flight total diverges from the aggregate good_emergence baseline
+    // checked above. Queried once per lossUpdates item, grouped, inside the
+    // same transaction as the shipment_items row locks above so the totals
+    // read here are transactionally consistent with those locks.
+    const lossUpdateItemIds = lossUpdates.map((update) => update.shipment_item_id);
+    const inFlightTotalsForLossUpdates =
+      lossUpdateItemIds.length > 0
+        ? await tx
+            .select({
+              shipmentItemId: in_flight.shipment_item_id,
+              total: sql<number>`coalesce(sum(${in_flight.quantity}), 0)::int`.as("total"),
+            })
+            .from(in_flight)
+            .where(
+              and(
+                eq(in_flight.institution_id, institutionId),
+                inArray(in_flight.shipment_item_id, lossUpdateItemIds),
+              ),
+            )
+            .groupBy(in_flight.shipment_item_id)
+        : [];
+    const inFlightTotalByItemId = new Map(
+      inFlightTotalsForLossUpdates.map((row) => [row.shipmentItemId, row.total]),
+    );
+
+    for (const update of lossUpdates) {
+      const row = lockedMutableItems.get(update.shipment_item_id);
+      if (!row) continue;
+      const inFlightTotal = inFlightTotalByItemId.get(update.shipment_item_id) ?? 0;
+      if (calculateRemaining(row, inFlightTotal) < 0) {
         throw new Error(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
       }
     }

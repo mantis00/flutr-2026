@@ -254,7 +254,7 @@ export function ReleaseEditComposer({
                     value={desiredRelease}
                     cap={releaseBounds.isFeasible ? releaseBounds.max : desiredRelease}
                     min={releaseBounds.isFeasible ? releaseBounds.min : desiredRelease}
-                    disabled={!releaseBounds.isFeasible}
+                    disabled={!goodEmergenceTracked || !releaseBounds.isFeasible}
                     invalid={!releaseBounds.isFeasible}
                     ariaLabel={`Released quantity for ${item.commonName}`}
                     ariaDescribedBy={releaseDescribedBy || undefined}

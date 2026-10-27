@@ -369,7 +369,11 @@ export default function ShipmentDetailPage() {
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
-        setErrorMessage(result?.error?.message ?? "Unable to save changes.");
+        // A field-level validation issue (e.g. "Total losses cannot exceed
+        // number received") is more actionable than the generic top-level
+        // message, so prefer it when present.
+        const detailMessage: string | undefined = result?.error?.details?.[0]?.message;
+        setErrorMessage(detailMessage ?? result?.error?.message ?? "Unable to save changes.");
         return;
       }
       setEditing(false);

@@ -143,6 +143,7 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: SHIPMENT_ID }],
       [baseShipmentItemRow({ id: 101, good_emergence: null, poor_emergence: 0 })], // untouched for good_emergence
+      [], // grouped actual in_flight totals for loss_updates items (101 has none)
     ]);
     const [lossPatchChain] = mockSequence(tx.update, [undefined]);
     mockSequence(tx.insert, [
@@ -169,6 +170,35 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
     expect(lossPatchChain.set).not.toHaveBeenCalledWith(
       expect.objectContaining({ good_emergence: expect.anything() }),
     );
+  });
+
+  it("rejects a loss_updates correction that satisfies the aggregate baseline but violates the actual in_flight floor", async () => {
+    const tx = setupTx();
+
+    // received 100 / losses 0 / good_emergence 10 / actual sum(in_flight) 40
+    // (40 butterflies genuinely released by other, prior release events).
+    // Setting poor_emergence to 90 passes the good_emergence-only check
+    // (100 - 90 - 10 = 0, not negative) but leaves only 10 available against
+    // 40 genuinely in flight — physically impossible.
+    mockSequence(tx.select, [
+      [{ id: SHIPMENT_ID }],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+      [{ shipmentItemId: 101, total: 40 }],
+    ]);
+    mockSequence(tx.update, [undefined]);
+
+    await expect(
+      createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+        items: [],
+        loss_updates: [{ shipment_item_id: 101, poor_emergence: 90 }],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+
+    // The loss-column write happens inside the same transaction as the
+    // validation that rejects it, so the throw rolls the whole transaction
+    // back; no release event is ever created.
+    expect(tx.update).toHaveBeenCalledTimes(1);
+    expect(tx.insert).not.toHaveBeenCalled();
   });
 });
 
@@ -326,6 +356,7 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
         },
       ],
       [baseShipmentItemRow({ id: 101, good_emergence: null, damaged_in_transit: 0 })], // NULL good_emergence, never touched
+      [], // grouped actual in_flight totals for lossChangedItemIds (101 has none)
     ]);
     // Two updates: the shipment_items absolute-loss-total patch, and the
     // separate release_event_losses event-attribution row update.
@@ -430,6 +461,7 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
         },
       ],
       [baseShipmentItemRow({ id: 101, good_emergence: 20, damaged_in_transit: 0 })],
+      [{ shipmentItemId: 101, total: 10 }], // grouped actual in_flight total (this event's own 10, no others)
     ]);
     // Three updates: shipment_items combined patch, in_flight quantity, and
     // the separate release_event_losses event-attribution row.
@@ -461,6 +493,46 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
     expect(eventLossChain.set).toHaveBeenCalledWith(
       expect.objectContaining({ damaged_in_transit: 2 }),
     );
+  });
+
+  it("rejects a loss edit that satisfies the aggregate baseline but violates the actual in_flight floor", async () => {
+    const tx = setupTx();
+
+    // This event's own in_flight quantity (10) is left unchanged, and the
+    // aggregate good_emergence (10) matches it exactly — the aggregate check
+    // alone would pass. But 40 butterflies are actually in flight across all
+    // events for this item (30 held by other events), so raising
+    // poor_emergence to 85 would drop post-loss availability (15) below that
+    // real physical total.
+    mockSequence(tx.select, [
+      [releaseEventRow],
+      [{ id: 9, shipmentItemId: 101, quantity: 10 }],
+      [],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+      [{ shipmentItemId: 101, total: 40 }],
+    ]);
+
+    await expect(
+      updateReleaseEventItems(INSTITUTION_ID, RELEASE_EVENT_ID, {
+        items: [{ shipment_item_id: 101, quantity: 10 }],
+        losses: [
+          {
+            shipment_item_id: 101,
+            damaged_in_transit: 0,
+            diseased_in_transit: 0,
+            parasite: 0,
+            non_emergence: 0,
+            poor_emergence: 85,
+          },
+        ],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+
+    // All writes happen after both validations in this function, so a
+    // rejection here leaves no partial write behind.
+    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.insert).not.toHaveBeenCalled();
+    expect(tx.delete).not.toHaveBeenCalled();
   });
 });
 

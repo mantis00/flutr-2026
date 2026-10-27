@@ -60,7 +60,7 @@ function validateLossesWithinReceived(
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Total losses cannot exceed number received",
-      path: ["number_received"],
+      path: [],
     });
   }
 }
