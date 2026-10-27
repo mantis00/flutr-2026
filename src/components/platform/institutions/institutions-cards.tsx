@@ -72,9 +72,14 @@ export default function InstitutionsCards({ institutions }: { institutions: Inst
                 <p className="text-sm break-all">{institution.email_address ?? "—"}</p>
               </div>
 
-              <Button className="w-full" variant="outline" asChild>
-                <Link href={platformHref}>Manage Institution</Link>
-              </Button>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button className="w-full" variant="outline" asChild>
+                  <Link href={ROUTES.tenant.dashboard(institution.slug)}>View as Admin</Link>
+                </Button>
+                <Button className="w-full" variant="outline" asChild>
+                  <Link href={platformHref}>Manage Institution</Link>
+                </Button>
+              </div>
             </CardContent>
           </Card>
         );

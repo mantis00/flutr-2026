@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/shared/date-picker";
 import { type ShipmentSummaryRow } from "@/lib/shipment-import-utils";
 import { useShipmentDelete } from "@/hooks/use-shipment-delete";
 
@@ -147,12 +148,14 @@ export default function DangerZone({
                   <Label htmlFor="delete-range-from" className="text-xs">
                     From
                   </Label>
-                  <Input
+                  <DatePicker
                     id="delete-range-from"
-                    type="date"
                     value={deleteRangeFrom}
-                    onChange={(e) => setDeleteRangeFrom(e.target.value)}
-                    className="h-8 w-36 text-xs"
+                    onChange={setDeleteRangeFrom}
+                    maxDate={deleteRangeTo || undefined}
+                    clearable
+                    placeholder="Start date"
+                    className="w-44"
                     aria-describedby={deleteRangeError ? "delete-range-error" : undefined}
                   />
                 </div>
@@ -160,12 +163,14 @@ export default function DangerZone({
                   <Label htmlFor="delete-range-to" className="text-xs">
                     To
                   </Label>
-                  <Input
+                  <DatePicker
                     id="delete-range-to"
-                    type="date"
                     value={deleteRangeTo}
-                    onChange={(e) => setDeleteRangeTo(e.target.value)}
-                    className="h-8 w-36 text-xs"
+                    onChange={setDeleteRangeTo}
+                    minDate={deleteRangeFrom || undefined}
+                    clearable
+                    placeholder="End date"
+                    className="w-44"
                     aria-describedby={deleteRangeError ? "delete-range-error" : undefined}
                   />
                 </div>

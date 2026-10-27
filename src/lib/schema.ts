@@ -52,6 +52,7 @@ export const institutions = pgTable("institutions", {
   slug: text("slug").notNull().unique(),
 
   name: text("name").notNull(),
+  main_header: text("main_header"),
   street_address: text("street_address").notNull(),
   extended_address: text("extended_address"),
   city: text("city").notNull(),

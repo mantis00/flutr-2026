@@ -21,8 +21,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { confirmDiscardUnsavedChanges } from "@/hooks/use-unsaved-changes-warning";
 import InstitutionProfileTab from "./institution-profile-tab";
-import InstitutionThemeTab from "./institution-theme-tab";
 import InstitutionUsersTab from "./institution-users-tab";
 import InstitutionDataTab from "./institution-data-tab";
 
@@ -30,6 +30,7 @@ export interface InstitutionDetail {
   id: number;
   name: string;
   slug: string;
+  main_header: string | null;
   description: string | null;
   street_address: string;
   extended_address: string | null;
@@ -60,7 +61,7 @@ export interface InstitutionUser {
 
 export type InstitutionDetailMode = "platform" | "tenant";
 
-type InstitutionDetailTab = "profile" | "theme" | "users" | "data";
+type InstitutionDetailTab = "profile" | "users" | "data";
 
 interface Props {
   institution: InstitutionDetail;
@@ -86,6 +87,7 @@ export default function InstitutionDetailShell({
   const [currentInstitution, setCurrentInstitution] = useState(institution);
   const [isDeletingInstitution, setIsDeletingInstitution] = useState(false);
   const [activeTab, setActiveTab] = useState<InstitutionDetailTab>(initialTab);
+  const [isProfileDirty, setIsProfileDirty] = useState(false);
 
   useEffect(() => {
     setCurrentInstitution(institution);
@@ -97,6 +99,14 @@ export default function InstitutionDetailShell({
 
   function handleTabChange(value: string) {
     const nextTab = value as InstitutionDetailTab;
+
+    // Leaving the profile tab unmounts its form, so confirm first. This sits
+    // on the change handler rather than the trigger's click so arrow-key tab
+    // switching is covered too.
+    if (nextTab !== activeTab && isProfileDirty && !confirmDiscardUnsavedChanges()) {
+      return;
+    }
+
     setActiveTab(nextTab);
 
     const params = new URLSearchParams(searchParams.toString());
@@ -183,11 +193,10 @@ export default function InstitutionDetailShell({
           aria-label="Institution settings"
           className={cn(
             "grid w-full sm:inline-flex sm:w-fit",
-            isTenant && readOnly ? "grid-cols-2" : "grid-cols-4",
+            isTenant && readOnly ? "grid-cols-1" : "grid-cols-3",
           )}
         >
           <TabsTrigger value="profile">Profile</TabsTrigger>
-          <TabsTrigger value="theme">Theme</TabsTrigger>
           {!(isTenant && readOnly) && <TabsTrigger value="users">Users</TabsTrigger>}
           {!(isTenant && readOnly) && <TabsTrigger value="data">Data</TabsTrigger>}
         </TabsList>
@@ -196,13 +205,10 @@ export default function InstitutionDetailShell({
           <InstitutionProfileTab
             institution={currentInstitution}
             onSaved={setCurrentInstitution}
+            onDirtyChange={setIsProfileDirty}
             mode={mode}
             readOnly={readOnly}
           />
-        </TabsContent>
-
-        <TabsContent value="theme">
-          <InstitutionThemeTab institution={currentInstitution} mode={mode} readOnly={readOnly} />
         </TabsContent>
 
         {!(isTenant && readOnly) && (

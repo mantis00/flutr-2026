@@ -73,9 +73,18 @@ export default function InstitutionsTableRow({ institution }: { institution: Ins
 
       {/* Actions */}
       <TableCell className="w-[1%] whitespace-nowrap">
-        <Button size="sm" variant="outline" asChild>
-          <Link href={platformHref}>Manage</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" asChild>
+            <Link href={ROUTES.tenant.dashboard(institution.slug)}>
+              View<span className="sr-only"> {institution.name} as admin</span>
+            </Link>
+          </Button>
+          <Button size="sm" variant="outline" asChild>
+            <Link href={platformHref}>
+              Manage<span className="sr-only"> {institution.name}</span>
+            </Link>
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );

@@ -34,6 +34,7 @@ export const platformInstitutionIdParamsSchema = z
 
 const baseInstitutionFields = {
   name: sanitizedNonEmpty(200),
+  main_header: z.string().max(120).transform(sanitizeText).nullable().optional(),
   street_address: sanitizedNonEmpty(200),
   extended_address: z.string().max(200).transform(sanitizeText).optional(),
   city: sanitizedNonEmpty(100),
@@ -45,9 +46,9 @@ const baseInstitutionFields = {
   website_url: z.string().trim().url().transform(sanitizeText).optional(),
   volunteer_url: z.string().trim().url().transform(sanitizeText).nullable().optional(),
   donation_url: z.string().trim().url().transform(sanitizeText).nullable().optional(),
-  facility_image_url: z.string().trim().url().transform(sanitizeText).optional(),
-  logo_url: z.string().trim().url().transform(sanitizeText).optional(),
-  description: z.string().max(2000).transform(sanitizeText).optional(),
+  facility_image_url: z.string().trim().url().transform(sanitizeText).nullable().optional(),
+  logo_url: z.string().trim().url().transform(sanitizeText).nullable().optional(),
+  description: z.string().max(2000).transform(sanitizeText).nullable().optional(),
 };
 
 /**

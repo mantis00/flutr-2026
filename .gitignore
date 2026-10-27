@@ -51,3 +51,6 @@ package-lock.json
 
 # database dumps
 *.dump
+
+# Playwright MCP scratch output
+.playwright-mcp/

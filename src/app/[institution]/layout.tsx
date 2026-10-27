@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getPublicInstitution } from "@/lib/queries/institution";
 import { InstitutionDataProvider } from "@/components/providers/institution-provider";
+import { readableForeground } from "@/lib/theme-color";
 import type { PublicInstitution } from "@/types/institution";
 
 interface InstitutionLayoutProps {
@@ -21,11 +22,19 @@ export default async function InstitutionLayout({ children, params }: Institutio
   };
 
   const primaryColor = institution.theme_colors?.[0];
+  const primaryForeground = primaryColor ? readableForeground(primaryColor) : null;
 
   return (
     <InstitutionDataProvider institution={institution}>
       <div
-        style={primaryColor ? ({ "--primary": primaryColor } as React.CSSProperties) : undefined}
+        style={
+          primaryColor
+            ? ({
+                "--primary": primaryColor,
+                ...(primaryForeground ? { "--primary-foreground": primaryForeground } : {}),
+              } as React.CSSProperties)
+            : undefined
+        }
       >
         {children}
       </div>
