@@ -14,6 +14,26 @@ export function confirmDiscardUnsavedChanges(): boolean {
   return window.confirm(MESSAGE);
 }
 
+/**
+ * The slice of the Navigation API this hook uses.
+ *
+ * Baseline since 2026-01-13 (Firefox 147; Safari 26.2, Chrome/Edge 102), so
+ * older browsers fall through to `beforeunload` and the click guard. Not yet
+ * in TypeScript's DOM lib.
+ */
+interface NavigateEvent extends Event {
+  navigationType: "push" | "replace" | "reload" | "traverse";
+}
+
+interface NavigationApi {
+  addEventListener(type: "navigate", listener: (event: NavigateEvent) => void): void;
+  removeEventListener(type: "navigate", listener: (event: NavigateEvent) => void): void;
+}
+
+function getNavigation(): NavigationApi | null {
+  return (window as Window & { navigation?: NavigationApi }).navigation ?? null;
+}
+
 export interface LeavingClick {
   /** `MouseEvent.button` — only a primary click navigates. */
   button: number;
@@ -54,10 +74,9 @@ export function isLeavingClick(click: LeavingClick): boolean {
  * not clicks this can judge, since they also respond to arrow keys. Those own
  * their guard via `confirmDiscardUnsavedChanges()` in their change handler.
  *
- * ponytail: browser Back/Forward is not covered — `popstate` fires after the
- * entry has already changed and isn't cancelable, and the App Router has no
- * navigation-blocking API. Blocking it needs a sentinel history entry, which
- * leaves the Back button one press out of step for the rest of the session.
+ * Back/Forward goes through the Navigation API's `navigate` event, the only
+ * cancelable hook for a traversal — `popstate` fires after the entry has
+ * already changed. Browsers without it keep the gap.
  */
 export function useUnsavedChangesWarning(enabled: boolean) {
   useEffect(() => {
@@ -87,13 +106,28 @@ export function useUnsavedChangesWarning(enabled: boolean) {
       event.stopPropagation();
     }
 
+    function handleNavigate(event: NavigateEvent) {
+      // Link clicks and router pushes are the click guard's job; double-
+      // handling them would prompt twice.
+      if (event.navigationType !== "traverse") return;
+      // A traversal is only cancelable while the page holds user activation.
+      if (!event.cancelable) return;
+      if (confirmDiscardUnsavedChanges()) return;
+
+      event.preventDefault();
+    }
+
+    const navigation = getNavigation();
+
     window.addEventListener("beforeunload", handleBeforeUnload);
     // Capture phase, so this runs before Link handles the click.
     document.addEventListener("click", handleClick, true);
+    navigation?.addEventListener("navigate", handleNavigate);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("click", handleClick, true);
+      navigation?.removeEventListener("navigate", handleNavigate);
     };
   }, [enabled]);
 }
