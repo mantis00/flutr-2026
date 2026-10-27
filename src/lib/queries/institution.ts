@@ -15,6 +15,7 @@ export const getPublicInstitution = cache(async (slug: string) => {
     .select({
       id: institutions.id,
       name: institutions.name,
+      main_header: institutions.main_header,
       description: institutions.description,
       street_address: institutions.street_address,
       extended_address: institutions.extended_address,

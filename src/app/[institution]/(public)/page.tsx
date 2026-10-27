@@ -68,6 +68,7 @@ export default async function InstitutionPage({ params }: InstitutionPageProps) 
     <div>
       {/* Hero + Live Stats */}
       <HeroSection
+        mainHeader={inst.main_header}
         description={inst.description}
         facility_image_url={inst.facility_image_url}
         totalButterflies={totalButterflies}

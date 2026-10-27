@@ -52,7 +52,7 @@ src/
 │   │   ├── layout/         # PlatformSidebar, PlatformHeader, PlatformFooter, nav items
 │   │   │   └── tenant/     # TenantHeader, TenantSidebar, TenantFooter, TenantNavList, nav items
 │   │   ├── institutions/   # InstitutionsTable and related
-│   │   └── detail/         # Institution detail tab components (DangerZone, FileDropZone, ImportResultsPanel, ShipmentViewer)
+│   │   └── detail/         # Institution detail tab components (DangerZone, FileDropZone, ImportResultsPanel, SectionInfo, ShipmentViewer)
 │   │   ├── species/        # Platform species CRUD client, dialogs, table/cards, utilities
 │   │   └── suppliers/      # SuppliersTable, toolbar, row, utils
 │   ├── tenant/             # Tenant-facing feature components
@@ -70,7 +70,8 @@ src/
 │   ├── use-shipment-delete.ts # Delete state, counts, and handleDelete for the Danger Zone
 │   ├── use-shipment-import.ts # All import/export state and handlers for the data tab
 │   ├── use-shipment-viewer.ts # Fetches and manages shipment summary list (auto-loads on mount)
-│   └── use-species-search.ts # Client-side species search, sort, filter, pagination
+│   ├── use-species-search.ts # Client-side species search, sort, filter, pagination
+│   └── use-unsaved-changes-warning.ts # Confirms before unsaved form edits are lost
 ├── lib/                    # Utilities and configuration
 │   ├── __test__/           # Utility, service, and query Jest tests
 │   ├── api-response.ts     # Standard API response helpers
@@ -85,6 +86,7 @@ src/
 │   ├── validation/         # Zod schemas + request/query helpers
 │   ├── wingspan/           # Wingspan image microservice client (client.ts) + pure image helpers (images.ts)
 │   ├── logger.ts           # Dev-only logging utility
+│   ├── institution-profile-body.ts # Pure builder for the organization profile PATCH body (dirty fields only)
 │   ├── shipment-import-utils.ts # Pure helpers for shipment import/export (SourceKind, detectSourceKind, readUploadFileAsText, formatShipmentDate, extractYear, filterRowsByDateRange)
 │   └── utils.ts            # Shared utilities: Tailwind class merging (cn), downloadBlob
 ├── types/                  # TypeScript type definitions
@@ -93,6 +95,7 @@ src/
 └── __test__/               # Jest test files
 docs/                       # Project documentation
 drizzle/                    # Generated database migrations
+public/docs/field-guide/    # Annotated screenshots shown in the organization info modals
 ```
 
 ## Commands
@@ -128,7 +131,7 @@ pnpm db:studio      # Open Drizzle Studio GUI
 
 ## Database Tables
 
-- `institutions` — Multi-tenant organizations (slug, name, full address fields, IABES membership, stats_active flag, theming, contact info, timestamps)
+- `institutions` — Multi-tenant organizations (slug, name, optional main_header, full address fields, IABES membership, stats_active flag, theming, contact info, timestamps). `main_header` overrides the default public homepage headline when set.
 - `institution_news` — Institution-specific news entries (institution_id, title, content, is_active, optional image_url, timestamps)
 - `users` — User accounts tied to an institution (name, globally unique email, password_hash, role, institution_id, timestamps)
 - `butterfly_species` — Global master species catalog (scientific_name, common_name, family, sub_family, lifespan_days, range, optional description, host_plant, habitat, fun_facts, timestamps). Imagery lives in the Wingspan microservice, matched on `scientific_name` — the legacy `img_wings_open` / `img_wings_closed` / `extra_img_1` / `extra_img_2` columns still exist but are no longer read or written.
@@ -181,8 +184,12 @@ Detailed documentation lives in `docs/`:
 | Schema                      | `* from @/lib/schema`                                                                                                                                                                                    | All table definitions (institutions, users, species, etc.)                                                                                                                                                                                                                                     |
 | Auth                        | `auth` from `@/auth`                                                                                                                                                                                     | NextAuth session helper                                                                                                                                                                                                                                                                        |
 | Link (no prefetch)          | `Link` from `@/components/ui/link`                                                                                                                                                                       | Next.js Link without scroll-prefetch (hover/focus only). Used for large lists to reduce requests                                                                                                                                                                                               |
-| Date picker                 | `DatePicker` from `@/components/shared/date-picker`                                                                                                                                                      | Popover + calendar that stores its value as a `YYYY-MM-DD` string; supports `minDate` / `maxDate` bounds and `aria-invalid` / `aria-describedby`                                                                                                                                               |
+| Date picker                 | `DatePicker` from `@/components/shared/date-picker`                                                                                                                                                      | Popover + calendar that stores its value as a `YYYY-MM-DD` string; supports `minDate` / `maxDate` bounds, `clearable` (adds a Clear control for optional bounds), `className` (trigger width) and `aria-invalid` / `aria-describedby`. Use instead of `<input type="date">`                    |
+| Theme foreground            | `readableForeground`, `readableAccentOnDark`, `contrastRatio`, `relativeLuminance` from `@/lib/theme-color`                                                                                              | `readableForeground` picks a legible `--primary-foreground` for an institution's theme color by measured contrast; `[institution]/layout.tsx` applies both as CSS variables. `readableAccentOnDark` falls back to white for theme colors too dark to read on the hero                          |
+| Unsaved changes guard       | `useUnsavedChangesWarning(enabled)`, `confirmDiscardUnsavedChanges()` from `@/hooks/use-unsaved-changes-warning`                                                                                         | Pass `form.formState.isDirty`. Prompts on reload/close via `beforeunload` and on in-app link clicks via a capture-phase guard. Controls that swap content without navigating (tabs) call `confirmDiscardUnsavedChanges()` in their own change handler. Reset the form after a successful save  |
+| Section info modal          | `SectionHeading`, `InfoUse` from `@/components/platform/institutions/detail/section-info`                                                                                                                | Heading + "i" button that opens a modal explaining where a group of fields is used publicly. `InfoUse` takes `src`/`alt` for an annotated screenshot from `public/docs/field-guide/`                                                                                                           |
 | Supplier select             | `SupplierSelect` from `@/components/tenant/shipments/supplier-select`                                                                                                                                    | Tenant-scoped supplier combobox used by the shipment add/edit forms                                                                                                                                                                                                                            |
+| Profile PATCH body          | `buildProfileUpdateBody` from `@/lib/institution-profile-body`                                                                                                                                           | Builds the organization profile update payload from React Hook Form's `dirtyFields`, so an untouched field can't overwrite a concurrent edit                                                                                                                                                   |
 | Shipment status badge       | `ShipmentStatusBadge` from `@/components/tenant/shipments/shipment-status-badge`                                                                                                                         | Standard pill rendering for "In flight" / "Completed" shipment status                                                                                                                                                                                                                          |
 | Shipment items table        | `ShipmentItemsTable` from `@/components/tenant/shipments/shipment-items-table`                                                                                                                           | Read-only + inline-editable species table wrapped in the shared search toolbar; enforces per-metric min/max client-side                                                                                                                                                                        |
 | Species picker dialog       | `SpeciesPickerDialog` from `@/components/tenant/shipments/species-picker-dialog`                                                                                                                         | Multi-select species picker backed by `useSpeciesSearch`; used by shipment add/edit                                                                                                                                                                                                            |

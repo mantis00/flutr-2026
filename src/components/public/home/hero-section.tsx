@@ -1,7 +1,9 @@
 import Image from "next/image";
 import { LiveStats } from "@/components/public/home/live-stats";
+import { readableAccentOnDark } from "@/lib/theme-color";
 
 interface HeroSectionProps {
+  mainHeader: string | null;
   description: string | null;
   facility_image_url: string | null;
   totalButterflies: number;
@@ -9,13 +11,29 @@ interface HeroSectionProps {
   primaryColor?: string;
 }
 
+/** Split a heading so the final word can carry the institution's accent color. */
+function splitAccent(heading: string): [string, string] {
+  const trimmed = heading.trim();
+  const lastSpace = trimmed.lastIndexOf(" ");
+  if (lastSpace === -1) return ["", trimmed];
+  return [trimmed.slice(0, lastSpace + 1), trimmed.slice(lastSpace + 1)];
+}
+
 export function HeroSection({
+  mainHeader,
   description,
   facility_image_url,
   totalButterflies,
   totalSpecies,
   primaryColor = "#a78bfa",
 }: HeroSectionProps) {
+  const [headingLead, headingAccent] = mainHeader
+    ? splitAccent(mainHeader)
+    : ["A World of ", "Natural Wonder."];
+  // A one-word header has no plain white lead to fall back on, so the accent
+  // has to carry the whole heading over the dark hero on its own.
+  const accentColor = readableAccentOnDark(primaryColor);
+
   return (
     <section aria-labelledby="hero-heading" className="relative w-full">
       {/* Full-width background image */}
@@ -89,9 +107,9 @@ export function HeroSection({
             id="hero-heading"
             className="max-w-lg text-3xl leading-tight font-bold text-white sm:text-4xl lg:text-6xl"
           >
-            A World of{" "}
-            <span className="font-bold italic" style={{ color: primaryColor }}>
-              Natural Wonder.
+            {headingLead}
+            <span className="font-bold italic" style={{ color: accentColor }}>
+              {headingAccent}
             </span>
           </h1>
           <p className="mt-3 max-w-md text-sm leading-relaxed text-white/80 sm:text-base">

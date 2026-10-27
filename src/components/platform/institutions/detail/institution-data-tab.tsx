@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/shared/date-picker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -342,12 +342,13 @@ export default function InstitutionDataTab({
                 <Label htmlFor="export-from" className="text-xs">
                   From
                 </Label>
-                <Input
+                <DatePicker
                   id="export-from"
-                  type="date"
                   value={exportFrom}
-                  onChange={(e) => setExportFrom(e.target.value)}
-                  className="h-8 text-xs"
+                  onChange={setExportFrom}
+                  maxDate={exportTo || undefined}
+                  clearable
+                  placeholder="Start date"
                   aria-describedby={exportRangeError ? "export-range-error" : undefined}
                 />
               </div>
@@ -355,12 +356,13 @@ export default function InstitutionDataTab({
                 <Label htmlFor="export-to" className="text-xs">
                   To
                 </Label>
-                <Input
+                <DatePicker
                   id="export-to"
-                  type="date"
                   value={exportTo}
-                  onChange={(e) => setExportTo(e.target.value)}
-                  className="h-8 text-xs"
+                  onChange={setExportTo}
+                  minDate={exportFrom || undefined}
+                  clearable
+                  placeholder="End date"
                   aria-describedby={exportRangeError ? "export-range-error" : undefined}
                 />
               </div>

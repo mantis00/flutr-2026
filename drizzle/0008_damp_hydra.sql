@@ -1,0 +1,1 @@
+ALTER TABLE "institutions" ADD COLUMN "main_header" text;

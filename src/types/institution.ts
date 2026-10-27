@@ -13,6 +13,7 @@ export type PublicInstitution = Pick<
   Institution,
   | "id"
   | "name"
+  | "main_header"
   | "description"
   | "street_address"
   | "extended_address"

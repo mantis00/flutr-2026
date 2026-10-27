@@ -17,7 +17,6 @@ interface Props {
 
 function resolveInitialTab(tab: string | undefined) {
   switch (tab) {
-    case "theme":
     case "users":
     case "data":
       return tab;
@@ -53,6 +52,7 @@ export default async function PlatformInstitutionPage({ params, searchParams }: 
     id: row.id,
     name: row.name,
     slug: row.slug,
+    main_header: row.main_header ?? null,
     description: row.description ?? null,
     street_address: row.street_address,
     extended_address: row.extended_address ?? null,

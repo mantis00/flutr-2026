@@ -56,7 +56,7 @@ export function ExploreLinks({ basePath }: ExploreLinksProps) {
                   href={link.href}
                   className="group bg-card hover:bg-accent focus-visible:ring-ring flex items-center gap-4 rounded-xl border p-4 shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
                 >
-                  <div className="bg-secondary text-secondary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
+                  <div className="bg-primary text-primary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg">
                     <Icon className="size-5" aria-hidden="true" />
                   </div>
                   <div className="min-w-0 flex-1">

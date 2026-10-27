@@ -17,8 +17,6 @@ interface Props {
 
 function resolveInitialTab(tab: string | undefined, readOnly: boolean) {
   switch (tab) {
-    case "theme":
-      return tab;
     case "users":
     case "data":
       return readOnly ? "profile" : tab;
@@ -55,6 +53,7 @@ export default async function OrganizationPage({ params, searchParams }: Props) 
     id: row.id,
     name: row.name,
     slug: row.slug,
+    main_header: row.main_header ?? null,
     description: row.description ?? null,
     street_address: row.street_address,
     extended_address: row.extended_address ?? null,
