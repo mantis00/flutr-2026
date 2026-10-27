@@ -151,6 +151,7 @@ Queries must never receive `slug`.
 - Sanitization (`sanitizeText`, `sanitizedNonEmpty`) happens in the validation layer only — never in routes or services.
 - Tenant context (`x-tenant-slug`) is **not** a validated body/query field — it is a request header read directly by the route.
 - `institutionId` must not appear in any body or query schema for tenant routes.
+- Shipment dates use `@/lib/date-only` to accept valid `YYYY-MM-DD` values or full ISO timestamps with seconds and a `Z`/`±HH:MM` timezone (optional fractional seconds). Malformed suffixes are rejected; the written calendar date is preserved. Shipment read/export queries return `YYYY-MM-DD` strings using SQL `to_char`.
 
 ---
 
@@ -269,24 +270,26 @@ Omit `slug` to test the missing-header `400` case. Never pass `institutionId` as
 
 ## 11. Shipment Deletion Rules
 
-Shipments cannot be deleted if dependent records exist. The query layer enforces this before issuing the `DELETE`.
+Deleting a shipment removes shipment-owned dependent records in the query layer before deleting the shipment header. Shared/reference data is preserved.
 
-### Blocked conditions
+### Shipment-owned records deleted
 
-| Dependent table  | Reason                                                         |
-| ---------------- | -------------------------------------------------------------- |
-| `shipment_items` | Items belong to the shipment and must be removed first         |
-| `release_events` | Release history is tied to the shipment and cannot be orphaned |
+| Dependent table        | Reason                                                 |
+| ---------------------- | ------------------------------------------------------ |
+| `in_flight`            | Release quantities point at shipment items             |
+| `release_event_losses` | Release loss history points at shipment items/events   |
+| `release_events`       | Release history belongs to the shipment                |
+| `shipment_items`       | Line items and transit/loss metrics belong to shipment |
+
+Shared records such as `butterfly_species`, users, institutions, and suppliers are not deleted.
 
 ### Behavior
 
-- If either dependency is found, the query throws `SHIPMENT_ERRORS.CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES`.
-- The route maps this to `409 CONFLICT`:
-  ```
-  DELETE /api/tenant/shipments/[id]
-  → 409 CONFLICT — "Cannot delete shipment with dependent records"
-  ```
-- A shipment with no items and no release events can be deleted normally (`200 OK`).
+- Single-shipment deletion requires `DELETE_SHIPMENT` through `canDeleteShipment`: ADMIN and SUPERUSER only. EMPLOYEE receives `403 FORBIDDEN`; tenant resolution still enforces institution access.
+- The delete runs inside a transaction and scopes every operation by `institution_id`.
+- Shipment-owned children are deleted before the shipment header to satisfy foreign-key constraints.
+- A shipment with or without items/releases can be deleted normally (`200 OK`).
+- Legitimate failures still return the appropriate route-level error (`401`, `403`, `404`, or `500`).
 
 ---
 

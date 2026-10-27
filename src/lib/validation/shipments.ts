@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dateOnlyToUtcDate, extractDateOnly } from "@/lib/date-only";
 import { paginatedQuerySchema } from "./pagination";
 
 /**
@@ -46,6 +47,14 @@ const shipmentItemCreateSchema = z
   })
   .strict();
 
+const shipmentDateOnlySchema = z
+  .string()
+  .transform((value) => extractDateOnly(value.trim()))
+  .refine((value): value is string => value !== null, {
+    message: "Expected a valid date in YYYY-MM-DD format",
+  })
+  .transform((value) => dateOnlyToUtcDate(value));
+
 /**
  * ---------------------------
  * Create Shipment
@@ -56,8 +65,8 @@ const shipmentItemCreateSchema = z
 export const createShipmentBodySchema = z
   .object({
     supplier_code: z.string({ message: "Supplier code is required" }).min(1).max(30),
-    shipment_date: z.coerce.date(),
-    arrival_date: z.coerce.date(),
+    shipment_date: shipmentDateOnlySchema,
+    arrival_date: shipmentDateOnlySchema,
     items: z.array(shipmentItemCreateSchema).min(1, "At least one shipment item is required"),
   })
   .strict()
@@ -125,8 +134,8 @@ const shipmentItemAddSchema = shipmentItemCreateSchema;
 export const updateShipmentBodySchema = z
   .object({
     supplier_code: z.string().min(1).max(30).optional(),
-    shipment_date: z.coerce.date().optional(),
-    arrival_date: z.coerce.date().optional(),
+    shipment_date: shipmentDateOnlySchema.optional(),
+    arrival_date: shipmentDateOnlySchema.optional(),
     update_items: z.array(shipmentItemUpdateSchema).min(1).optional(),
     add_items: z.array(shipmentItemAddSchema).min(1).optional(),
     delete_items: z.array(z.number().int().positive()).min(1).optional(),

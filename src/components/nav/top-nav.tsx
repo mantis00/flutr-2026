@@ -36,6 +36,7 @@ export function TopNav({ links, className }: TopNavProps) {
                 height={32}
                 sizes="(max-width: 640px) 20px, (max-width: 1024px) 24px, 28px"
                 className="size-full object-contain"
+                unoptimized
               />
             </span>
           ) : (

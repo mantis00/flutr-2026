@@ -15,10 +15,6 @@ jest.mock("@/components/public/gallery/gallery-content", () => ({
   GalleryContent: () => null,
 }));
 
-jest.mock("@/components/public/gallery/curators-note", () => ({
-  CuratorsNote: () => null,
-}));
-
 import GalleryPage from "@/app/[institution]/(public)/gallery/page";
 import { getPublicInstitution } from "@/lib/queries/institution";
 import { getGalleryData, getGalleryGlobalSpecies } from "@/lib/queries/gallery";

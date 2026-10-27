@@ -269,11 +269,11 @@ function CategoryStepper({
           size="icon"
           variant="outline"
           className="size-10 shrink-0"
-          onClick={() => onChange(clamp(value - 1))}
-          disabled={disabled || value === 0}
-          aria-label={`Decrease ${ariaLabel}`}
+          onClick={() => onChange(clamp(value + 1))}
+          disabled={disabled || value >= cap}
+          aria-label={`Increase ${ariaLabel}`}
         >
-          <Minus className="size-4" />
+          <Plus className="size-4" />
         </Button>
         <Input
           type="number"
@@ -296,11 +296,11 @@ function CategoryStepper({
           size="icon"
           variant="outline"
           className="size-10 shrink-0"
-          onClick={() => onChange(clamp(value + 1))}
-          disabled={disabled || value >= cap}
-          aria-label={`Increase ${ariaLabel}`}
+          onClick={() => onChange(clamp(value - 1))}
+          disabled={disabled || value === 0}
+          aria-label={`Decrease ${ariaLabel}`}
         >
-          <Plus className="size-4" />
+          <Minus className="size-4" />
         </Button>
       </div>
     </div>

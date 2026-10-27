@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDateOnlyForDisplay } from "@/lib/date-only";
 import { ROUTES } from "@/lib/routes";
 
 import {
@@ -20,18 +21,6 @@ import {
   type ShipmentDetailResponse,
   type ShipmentItemRow,
 } from "@/components/tenant/shipments/types";
-
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "2-digit",
-  year: "numeric",
-});
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "—";
-  return dateFormatter.format(date);
-}
 
 function sumCategories(values: CategoryQuantities[number] | undefined): number {
   if (!values) return 0;
@@ -219,8 +208,9 @@ export default function CreateReleasePage() {
         </Button>
         <h1 className="text-3xl font-semibold">New release</h1>
         <p className="text-muted-foreground">
-          {data.shipment.supplierCode} · Shipped {formatDate(data.shipment.shipmentDate)} · Arrived{" "}
-          {formatDate(data.shipment.arrivalDate)}
+          {data.shipment.supplierCode} · Shipped{" "}
+          {formatDateOnlyForDisplay(data.shipment.shipmentDate)} · Arrived{" "}
+          {formatDateOnlyForDisplay(data.shipment.arrivalDate)}
         </p>
       </div>
 

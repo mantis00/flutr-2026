@@ -144,13 +144,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
     return ok({ deleted: true });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === SHIPMENT_ERRORS.CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES
-    ) {
-      return conflict("Cannot delete shipment with dependent records");
-    }
-
     if (error instanceof Error) {
       if (error.message === "UNAUTHORIZED") return unauthorized();
       if (error.message === "FORBIDDEN") return forbidden();

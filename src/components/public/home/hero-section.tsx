@@ -46,6 +46,7 @@ export function HeroSection({
             sizes="100vw"
             className="object-cover"
             priority
+            unoptimized
           />
         ) : (
           <div className="absolute inset-0 overflow-hidden bg-gradient-to-br from-emerald-950 via-teal-900 to-green-950">

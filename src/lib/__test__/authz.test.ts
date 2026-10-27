@@ -1,4 +1,11 @@
-import { requireUser, normalizeRole, AUTH_ERRORS } from "@/lib/authz";
+import {
+  requireUser,
+  normalizeRole,
+  AUTH_ERRORS,
+  canDeleteShipment,
+  canWriteShipment,
+} from "@/lib/authz";
+import { hasPermission } from "@/lib/permissions";
 import type { Session } from "next-auth";
 
 function makeSession(
@@ -77,5 +84,29 @@ describe("normalizeRole", () => {
   it("maps unknown/arbitrary roles to EMPLOYEE", () => {
     expect(normalizeRole("unknown")).toBe("EMPLOYEE");
     expect(normalizeRole("")).toBe("EMPLOYEE");
+  });
+});
+
+describe("shipment deletion permission", () => {
+  it.each([
+    ["ADMIN", true],
+    ["SUPERUSER", true],
+    ["EMPLOYEE", false],
+  ] as const)("grants DELETE_SHIPMENT to %s: %s", (role, allowed) => {
+    const user = requireUser(makeSession({ role }));
+
+    expect(hasPermission(role, "DELETE_SHIPMENT")).toBe(allowed);
+    expect(canDeleteShipment(user)).toBe(allowed);
+  });
+
+  it("preserves EMPLOYEE shipment creation without granting deletion", () => {
+    const user = requireUser(makeSession({ role: "EMPLOYEE" }));
+
+    expect(canWriteShipment(user)).toBe(true);
+    expect(canDeleteShipment(user)).toBe(false);
+  });
+
+  it("does not grant shipment deletion to unknown roles", () => {
+    expect(hasPermission("unknown", "DELETE_SHIPMENT")).toBe(false);
   });
 });

@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 
 import { Link } from "@/components/ui/link";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 
 import { ROUTES } from "@/lib/routes";
+import { formatDateOnlyForDisplay } from "@/lib/date-only";
+import { hasPermission } from "@/lib/permissions";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,18 +50,6 @@ import type { ShipmentListRow } from "@/components/tenant/shipments/types";
 
 const PAGE_LIMIT = 50;
 
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "2-digit",
-  year: "numeric",
-});
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "—";
-  return dateFormatter.format(date);
-}
-
 type Pagination = {
   page: number;
   limit: number;
@@ -69,6 +60,8 @@ type Pagination = {
 export default function ShipmentsListPage() {
   const params = useParams<{ institution: string }>();
   const router = useRouter();
+  const { data: session } = useSession();
+  const canDelete = hasPermission(session?.user?.role ?? "", "DELETE_SHIPMENT");
   const slug = params?.institution ?? "";
 
   const [shipments, setShipments] = useState<ShipmentListRow[]>([]);
@@ -90,6 +83,10 @@ export default function ShipmentsListPage() {
   const releaseHref = useCallback(
     (id: number) => ROUTES.tenant.shipmentReleaseNew(slug, id),
     [slug],
+  );
+  const deleteTarget = useMemo(
+    () => shipments.find((shipment) => shipment.id === deleteTargetId) ?? null,
+    [deleteTargetId, shipments],
   );
 
   const loadShipments = useCallback(
@@ -136,10 +133,12 @@ export default function ShipmentsListPage() {
     return () => ac.abort();
   }, [page, loadShipments]);
 
-  const confirmDelete = async () => {
-    if (deleteTargetId === null) return;
+  const confirmDelete = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (!canDelete || deleteTargetId === null || busyId !== null) return;
     const id = deleteTargetId;
     setBusyId(id);
+    setErrorMessage(null);
     try {
       const response = await fetch(`/api/tenant/shipments/${id}`, {
         method: "DELETE",
@@ -147,13 +146,17 @@ export default function ShipmentsListPage() {
       });
       if (!response.ok) {
         const result = await response.json().catch(() => null);
+        setDeleteTargetId(null);
         setErrorMessage(result?.error?.message ?? "Unable to delete shipment.");
         return;
       }
       setShipments((current) => current.filter((s) => s.id !== id));
+      setDeleteTargetId(null);
+    } catch {
+      setDeleteTargetId(null);
+      setErrorMessage("Unable to delete shipment.");
     } finally {
       setBusyId(null);
-      setDeleteTargetId(null);
     }
   };
 
@@ -243,8 +246,8 @@ export default function ShipmentsListPage() {
                             {shipment.supplierCode}
                           </Link>
                         </TableCell>
-                        <TableCell>{formatDate(shipment.shipmentDate)}</TableCell>
-                        <TableCell>{formatDate(shipment.arrivalDate)}</TableCell>
+                        <TableCell>{formatDateOnlyForDisplay(shipment.shipmentDate)}</TableCell>
+                        <TableCell>{formatDateOnlyForDisplay(shipment.arrivalDate)}</TableCell>
                         <TableCell>
                           <ShipmentStatusBadge
                             remaining={shipment.remaining}
@@ -261,27 +264,29 @@ export default function ShipmentsListPage() {
                                 <Link href={releaseHref(shipment.id)}>Add release</Link>
                               </Button>
                             )}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  aria-label={`More actions for ${shipment.supplierCode}`}
-                                  disabled={busyId === shipment.id}
-                                >
-                                  <MoreHorizontal className="size-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  className="text-destructive focus:text-destructive"
-                                  onSelect={() => setDeleteTargetId(shipment.id)}
-                                >
-                                  <Trash2 className="size-4" />
-                                  Delete shipment
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            {canDelete && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    aria-label={`More actions for ${shipment.supplierCode}`}
+                                    disabled={busyId === shipment.id}
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onSelect={() => setDeleteTargetId(shipment.id)}
+                                  >
+                                    <Trash2 aria-hidden="true" className="size-4" />
+                                    Delete shipment
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -319,19 +324,44 @@ export default function ShipmentsListPage() {
       </Card>
 
       <AlertDialog
-        open={deleteTargetId !== null}
-        onOpenChange={(open) => !open && setDeleteTargetId(null)}
+        open={canDelete && deleteTargetId !== null}
+        onOpenChange={(open) => {
+          if (!open && busyId === null) setDeleteTargetId(null);
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this shipment?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Shipments with line items or releases cannot be deleted. This action cannot be undone.
+            <AlertDialogTitle>Delete shipment?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-1.5">
+                <p>
+                  Are you sure you want to delete this shipment? This will permanently delete the
+                  shipment and all information associated with it. This action cannot be undone.
+                </p>
+                {deleteTarget && (
+                  <div className="bg-muted text-muted-foreground rounded-md p-3 text-sm">
+                    <div className="text-foreground font-medium">
+                      {deleteTarget.supplierCode} shipment #{deleteTarget.id}
+                    </div>
+                    <div>
+                      Shipped {formatDateOnlyForDisplay(deleteTarget.shipmentDate)} - Arrived{" "}
+                      {formatDateOnlyForDisplay(deleteTarget.arrivalDate)}
+                    </div>
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+            <AlertDialogCancel disabled={busyId !== null}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={busyId !== null}
+              onClick={confirmDelete}
+            >
+              <Trash2 aria-hidden="true" className="size-4" />
+              {busyId !== null ? "Deleting..." : "Delete shipment"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

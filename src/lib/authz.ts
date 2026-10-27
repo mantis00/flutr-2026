@@ -121,6 +121,10 @@ export function canWriteShipment(user: AuthenticatedUser): boolean {
   return can(user, "CREATE_SHIPMENT");
 }
 
+export function canDeleteShipment(user: AuthenticatedUser): boolean {
+  return can(user, "DELETE_SHIPMENT");
+}
+
 export function canCreateRelease(user: AuthenticatedUser): boolean {
   return can(user, "CREATE_RELEASE");
 }

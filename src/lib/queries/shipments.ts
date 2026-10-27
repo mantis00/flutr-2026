@@ -1,12 +1,14 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { dateOnlyToUtcDate } from "@/lib/date-only";
 import {
   shipments,
   shipment_items,
   butterfly_species,
   in_flight,
   release_events,
+  release_event_losses,
 } from "@/lib/schema";
 import { ensureSpeciesLinksForInstitution } from "@/lib/queries/species";
 
@@ -16,7 +18,6 @@ export const SHIPMENT_ERRORS = {
   CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
   INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
   SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
-  CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES: "CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES",
 } as const;
 
 /**
@@ -24,8 +25,7 @@ export const SHIPMENT_ERRORS = {
  * Input shape/calendar validity is enforced upstream by Zod.
  */
 export function parseDateOnlyToUtcStart(value: string): Date {
-  const [year, month, day] = value.split("-").map((part) => Number.parseInt(part, 10));
-  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+  return dateOnlyToUtcDate(value);
 }
 
 /**
@@ -49,8 +49,12 @@ export async function listShipments(institutionId: number, page: number, limit: 
       .select({
         id: shipments.id,
         supplierCode: shipments.supplier_code,
-        shipmentDate: shipments.shipment_date,
-        arrivalDate: shipments.arrival_date,
+        shipmentDate: sql<string>`to_char(${shipments.shipment_date}, 'YYYY-MM-DD')`.as(
+          "shipment_date",
+        ),
+        arrivalDate: sql<string>`to_char(${shipments.arrival_date}, 'YYYY-MM-DD')`.as(
+          "arrival_date",
+        ),
         createdAt: shipments.created_at,
       })
       .from(shipments)
@@ -208,8 +212,10 @@ export async function getShipmentWithItems(institutionId: number, shipmentId: nu
     .select({
       id: shipments.id,
       supplierCode: shipments.supplier_code,
-      shipmentDate: shipments.shipment_date,
-      arrivalDate: shipments.arrival_date,
+      shipmentDate: sql<string>`to_char(${shipments.shipment_date}, 'YYYY-MM-DD')`.as(
+        "shipment_date",
+      ),
+      arrivalDate: sql<string>`to_char(${shipments.arrival_date}, 'YYYY-MM-DD')`.as("arrival_date"),
       createdAt: shipments.created_at,
     })
     .from(shipments)
@@ -342,8 +348,10 @@ export async function getShipmentSummaryList(institutionId: number) {
     .select({
       id: shipments.id,
       supplierCode: shipments.supplier_code,
-      shipmentDate: shipments.shipment_date,
-      arrivalDate: shipments.arrival_date,
+      shipmentDate: sql<string>`to_char(${shipments.shipment_date}, 'YYYY-MM-DD')`.as(
+        "shipment_date",
+      ),
+      arrivalDate: sql<string>`to_char(${shipments.arrival_date}, 'YYYY-MM-DD')`.as("arrival_date"),
       itemCount: count(shipment_items.id),
       totalReceived: sql<number>`coalesce(sum(${shipment_items.number_received}), 0)`.as(
         "total_received",
@@ -383,8 +391,10 @@ export async function listShipmentExportRows(
   return db
     .select({
       supplierCode: shipments.supplier_code,
-      shipmentDate: shipments.shipment_date,
-      arrivalDate: shipments.arrival_date,
+      shipmentDate: sql<string>`to_char(${shipments.shipment_date}, 'YYYY-MM-DD')`.as(
+        "shipment_date",
+      ),
+      arrivalDate: sql<string>`to_char(${shipments.arrival_date}, 'YYYY-MM-DD')`.as("arrival_date"),
       scientificName: butterfly_species.scientific_name,
       commonName: butterfly_species.common_name,
       numberReceived: shipment_items.number_received,
@@ -572,45 +582,77 @@ export async function updateShipment(
 /**
  * Delete single shipment
  *
- * Blocked if shipment_items or release_events exist for this shipment.
+ * Deletes shipment-owned children before deleting the shipment header.
  */
 export async function deleteShipment(institutionId: number, shipmentId: number) {
-  const [itemRow] = await db
-    .select({ id: shipment_items.id })
-    .from(shipment_items)
-    .where(
-      and(
-        eq(shipment_items.shipment_id, shipmentId),
-        eq(shipment_items.institution_id, institutionId),
-      ),
-    )
-    .limit(1);
+  return db.transaction(async (tx) => {
+    const [targetShipment] = await tx
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(and(eq(shipments.id, shipmentId), eq(shipments.institution_id, institutionId)))
+      .limit(1);
 
-  if (itemRow) {
-    throw new Error(SHIPMENT_ERRORS.CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES);
-  }
+    if (!targetShipment) return false;
 
-  const [releaseRow] = await db
-    .select({ id: release_events.id })
-    .from(release_events)
-    .where(
-      and(
-        eq(release_events.shipment_id, shipmentId),
-        eq(release_events.institution_id, institutionId),
-      ),
-    )
-    .limit(1);
+    const targetItems = await tx
+      .select({ id: shipment_items.id })
+      .from(shipment_items)
+      .where(
+        and(
+          eq(shipment_items.shipment_id, shipmentId),
+          eq(shipment_items.institution_id, institutionId),
+        ),
+      );
 
-  if (releaseRow) {
-    throw new Error(SHIPMENT_ERRORS.CANNOT_DELETE_SHIPMENT_WITH_DEPENDENCIES);
-  }
+    const itemIds = targetItems.map((item) => item.id);
 
-  const result = await db
-    .delete(shipments)
-    .where(and(eq(shipments.id, shipmentId), eq(shipments.institution_id, institutionId)))
-    .returning({ id: shipments.id });
+    if (itemIds.length > 0) {
+      await tx
+        .delete(in_flight)
+        .where(
+          and(
+            eq(in_flight.institution_id, institutionId),
+            inArray(in_flight.shipment_item_id, itemIds),
+          ),
+        );
 
-  return result.length > 0;
+      await tx
+        .delete(release_event_losses)
+        .where(
+          and(
+            eq(release_event_losses.institution_id, institutionId),
+            inArray(release_event_losses.shipment_item_id, itemIds),
+          ),
+        );
+    }
+
+    await tx
+      .delete(release_events)
+      .where(
+        and(
+          eq(release_events.institution_id, institutionId),
+          eq(release_events.shipment_id, shipmentId),
+        ),
+      );
+
+    if (itemIds.length > 0) {
+      await tx
+        .delete(shipment_items)
+        .where(
+          and(
+            eq(shipment_items.institution_id, institutionId),
+            eq(shipment_items.shipment_id, shipmentId),
+          ),
+        );
+    }
+
+    const result = await tx
+      .delete(shipments)
+      .where(and(eq(shipments.id, shipmentId), eq(shipments.institution_id, institutionId)))
+      .returning({ id: shipments.id });
+
+    return result.length > 0;
+  });
 }
 
 /**
@@ -664,7 +706,7 @@ export async function deleteShipmentsForInstitution(
 
     const shipmentIds = targetShipments.map((s) => s.id);
 
-    // Resolve shipment item IDs (needed to target in_flight)
+    // Resolve shipment item IDs (needed to target child rows that restrict shipment_items)
     const targetItems = await tx
       .select({ id: shipment_items.id })
       .from(shipment_items)
@@ -685,6 +727,15 @@ export async function deleteShipmentsForInstitution(
           and(
             eq(in_flight.institution_id, institutionId),
             inArray(in_flight.shipment_item_id, itemIds),
+          ),
+        );
+
+      await tx
+        .delete(release_event_losses)
+        .where(
+          and(
+            eq(release_event_losses.institution_id, institutionId),
+            inArray(release_event_losses.shipment_item_id, itemIds),
           ),
         );
     }

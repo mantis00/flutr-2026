@@ -264,8 +264,8 @@ Response shape:
     {
       "id": 1,
       "supplierCode": "SUP-1",
-      "shipmentDate": "2026-01-10T00:00:00.000Z",
-      "arrivalDate": "2026-01-11T00:00:00.000Z",
+      "shipmentDate": "2026-01-10",
+      "arrivalDate": "2026-01-11",
       "createdAt": "2026-01-12T00:00:00.000Z"
     }
   ],
@@ -287,8 +287,8 @@ Response shape:
   "shipment": {
     "id": 1,
     "supplierCode": "SUP-1",
-    "shipmentDate": "2026-01-10T00:00:00.000Z",
-    "arrivalDate": "2026-01-11T00:00:00.000Z",
+    "shipmentDate": "2026-01-10",
+    "arrivalDate": "2026-01-11",
     "createdAt": "2026-01-12T00:00:00.000Z"
   },
   "items": []
@@ -297,14 +297,11 @@ Response shape:
 
 ### DELETE /api/tenant/shipments/[id]
 
-Returns `409 CONFLICT` if the shipment has any dependent records:
+Requires `DELETE_SHIPMENT` (ADMIN or SUPERUSER); EMPLOYEE receives `403 FORBIDDEN`.
 
-- `shipment_items` exist for this shipment, **or**
-- `release_events` exist for this shipment
+Returns `200 OK` with `{ "deleted": true }` after deleting `in_flight`, `release_event_losses`, `release_events`, `shipment_items`, then the shipment in one transaction. Every destructive statement is scoped by `institution_id`; shared records are preserved.
 
-Returns `200 OK` with `{ "deleted": true }` when the shipment has no dependencies and is successfully deleted.
-
-Returns `404 NOT_FOUND` if the shipment does not exist.
+Returns `404 NOT_FOUND` if the shipment does not exist in the resolved institution. ADMIN can only resolve their own institution; SUPERUSER can resolve any valid tenant slug.
 
 Release mutation note: current operational `shipment_items.good_emergence` values
 are numeric and new rows default to `0`. The nullable column reserves `NULL` for

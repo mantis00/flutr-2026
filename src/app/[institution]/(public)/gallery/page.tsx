@@ -5,7 +5,6 @@ import { attachImages } from "@/lib/wingspan/client";
 import { getGalleryData, getGalleryGlobalSpecies } from "@/lib/queries/gallery";
 import { GalleryHeader } from "@/components/public/gallery/gallery-header";
 import { GalleryContent } from "@/components/public/gallery/gallery-content";
-import { CuratorsNote } from "@/components/public/gallery/curators-note";
 
 interface GalleryPageProps {
   params: Promise<{ institution: string }>;
@@ -38,7 +37,6 @@ export default async function GalleryPage({ params }: GalleryPageProps) {
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <GalleryHeader />
       <GalleryContent slug={slug} species={speciesWithImages} globalSpecies={globalWithImages} />
-      <CuratorsNote />
     </div>
   );
 }

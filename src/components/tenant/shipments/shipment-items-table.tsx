@@ -330,11 +330,11 @@ function MetricStepper({ value, ariaLabel, onChange, min = 0, max }: MetricStepp
         size="icon"
         variant="outline"
         className="size-7"
-        aria-label={`Decrease ${ariaLabel}`}
-        disabled={value <= min}
-        onClick={() => onChange(clamp(value - 1))}
+        aria-label={`Increase ${ariaLabel}`}
+        disabled={typeof max === "number" && value >= max}
+        onClick={() => onChange(clamp(value + 1))}
       >
-        <Minus className="size-3" />
+        <Plus className="size-3" />
       </Button>
       <Input
         type="number"
@@ -356,11 +356,11 @@ function MetricStepper({ value, ariaLabel, onChange, min = 0, max }: MetricStepp
         size="icon"
         variant="outline"
         className="size-7"
-        aria-label={`Increase ${ariaLabel}`}
-        disabled={typeof max === "number" && value >= max}
-        onClick={() => onChange(clamp(value + 1))}
+        aria-label={`Decrease ${ariaLabel}`}
+        disabled={value <= min}
+        onClick={() => onChange(clamp(value - 1))}
       >
-        <Plus className="size-3" />
+        <Minus className="size-3" />
       </Button>
     </div>
   );

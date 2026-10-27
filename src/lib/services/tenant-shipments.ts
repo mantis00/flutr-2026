@@ -3,6 +3,7 @@ import {
   requireUser,
   canReadShipment,
   canWriteShipment,
+  canDeleteShipment,
   canCreateRelease,
   canManageInstitutionProfile,
 } from "@/lib/authz";
@@ -101,7 +102,7 @@ export async function updateTenantShipment(data: UpdateTenantShipmentInput) {
 export async function deleteTenantShipment({ slug, id }: TenantShipmentIdInput) {
   const user = requireUser(await auth());
 
-  if (!canWriteShipment(user)) throw new Error("FORBIDDEN");
+  if (!canDeleteShipment(user)) throw new Error("FORBIDDEN");
 
   const tenantId = await resolveTenantBySlug(user, slug);
 

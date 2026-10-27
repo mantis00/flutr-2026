@@ -51,6 +51,7 @@ export function InstitutionCard({
                 fill
                 sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                 className="object-cover transition-transform group-hover:scale-105"
+                unoptimized
               />
             ) : (
               <div className="bg-muted flex size-full items-center justify-center">
@@ -75,6 +76,7 @@ export function InstitutionCard({
                     width={40}
                     height={40}
                     className="rounded-full object-cover"
+                    unoptimized
                   />
                 ) : (
                   <span className="text-muted-foreground text-xs font-semibold">{initials}</span>

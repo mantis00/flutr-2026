@@ -52,10 +52,10 @@ export function ReleaseQuantityControls({
           size="icon"
           variant="outline"
           className="size-10"
-          onClick={() => onChange(clamp(value - 1))}
-          aria-label={`Decrease ${ariaLabel}`}
+          onClick={() => onChange(clamp(value + 1))}
+          aria-label={`Increase ${ariaLabel}`}
         >
-          <Minus className="size-4" />
+          <Plus className="size-4" />
         </Button>
         <Input
           type="number"
@@ -80,10 +80,10 @@ export function ReleaseQuantityControls({
           size="icon"
           variant="outline"
           className="size-10"
-          onClick={() => onChange(clamp(value + 1))}
-          aria-label={`Increase ${ariaLabel}`}
+          onClick={() => onChange(clamp(value - 1))}
+          aria-label={`Decrease ${ariaLabel}`}
         >
-          <Plus className="size-4" />
+          <Minus className="size-4" />
         </Button>
       </div>
       <Button

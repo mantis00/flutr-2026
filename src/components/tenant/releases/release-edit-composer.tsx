@@ -174,11 +174,11 @@ function CompactStepper({
           size="icon"
           variant="outline"
           className="size-8 shrink-0"
-          onClick={() => onChange(clamp(value - 1))}
-          disabled={value <= 0}
-          aria-label={`Decrease ${ariaLabel}`}
+          onClick={() => onChange(clamp(value + 1))}
+          disabled={value >= cap}
+          aria-label={`Increase ${ariaLabel}`}
         >
-          <Minus className="size-3.5" />
+          <Plus className="size-3.5" />
         </Button>
         <Input
           type="number"
@@ -197,11 +197,11 @@ function CompactStepper({
           size="icon"
           variant="outline"
           className="size-8 shrink-0"
-          onClick={() => onChange(clamp(value + 1))}
-          disabled={value >= cap}
-          aria-label={`Increase ${ariaLabel}`}
+          onClick={() => onChange(clamp(value - 1))}
+          disabled={value <= 0}
+          aria-label={`Decrease ${ariaLabel}`}
         >
-          <Plus className="size-3.5" />
+          <Minus className="size-3.5" />
         </Button>
       </div>
     </div>

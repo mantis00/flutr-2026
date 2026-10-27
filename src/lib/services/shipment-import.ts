@@ -82,18 +82,14 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-function formatExportDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
 function mapRowToExportRecord(row: ShipmentExportRow) {
   return [
     row.scientificName,
     row.commonName,
     row.numberReceived,
     row.supplierCode,
-    formatExportDate(row.shipmentDate),
-    formatExportDate(row.arrivalDate),
+    row.shipmentDate,
+    row.arrivalDate,
     row.emergedInTransit,
     row.damagedInTransit,
     row.diseasedInTransit,

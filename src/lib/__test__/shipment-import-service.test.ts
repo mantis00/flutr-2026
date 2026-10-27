@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as xlsx from "xlsx";
 
 jest.mock("@/auth", () => ({
   auth: jest.fn(),
@@ -24,13 +25,19 @@ jest.mock("@/lib/queries/suppliers", () => ({
 import {
   buildShipmentImportPreviewForInstitution,
   commitShipmentImportForInstitution,
+  exportShipmentWorkbookForInstitution,
 } from "@/lib/services/shipment-import";
-import { createShipment, shipmentHeaderExists } from "@/lib/queries/shipments";
+import {
+  createShipment,
+  listShipmentExportRows,
+  shipmentHeaderExists,
+} from "@/lib/queries/shipments";
 import { ensureSpeciesLinksForInstitution, listSpeciesGlobal } from "@/lib/queries/species";
 import { ensureSupplierExistsForGlobalImport, listSuppliersGlobal } from "@/lib/queries/suppliers";
 import type { ShipmentImportDraft } from "@/lib/validation/shipment-import";
 
 const mockCreateShipment = createShipment as jest.Mock;
+const mockListShipmentExportRows = listShipmentExportRows as jest.Mock;
 const mockShipmentHeaderExists = shipmentHeaderExists as jest.Mock;
 const mockEnsureSpeciesLinksForInstitution = ensureSpeciesLinksForInstitution as jest.Mock;
 const mockListSpeciesGlobal = listSpeciesGlobal as jest.Mock;
@@ -66,6 +73,38 @@ function shipmentDraft(supplierCode = "EBN"): ShipmentImportDraft {
 describe("shipment import service", () => {
   beforeEach(() => {
     jest.resetAllMocks();
+  });
+
+  describe("exportShipmentWorkbookForInstitution", () => {
+    it.each([
+      ["2026-09-09", "2026-09-10"],
+      ["2027-01-01", "2027-01-02"],
+    ])("preserves exact exported calendar dates %s -> %s", async (shipmentDate, arrivalDate) => {
+      mockListShipmentExportRows.mockResolvedValueOnce([
+        {
+          scientificName: "Caligo atreus",
+          commonName: "Owl butterfly",
+          numberReceived: 10,
+          supplierCode: "EBN",
+          shipmentDate,
+          arrivalDate,
+          emergedInTransit: 0,
+          damagedInTransit: 0,
+          diseasedInTransit: 0,
+          parasite: 0,
+          nonEmergence: 0,
+          poorEmergence: 0,
+        },
+      ]);
+
+      const buffer = await exportShipmentWorkbookForInstitution({ institutionId: 77 });
+      const workbook = xlsx.read(buffer, { type: "buffer" });
+      const worksheet = workbook.Sheets.Shipments;
+
+      expect(mockListShipmentExportRows).toHaveBeenCalledWith(77, undefined);
+      expect(worksheet.E2).toMatchObject({ t: "s", v: shipmentDate });
+      expect(worksheet.F2).toMatchObject({ t: "s", v: arrivalDate });
+    });
   });
 
   describe("buildShipmentImportPreviewForInstitution", () => {
