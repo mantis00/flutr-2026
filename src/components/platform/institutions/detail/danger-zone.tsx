@@ -153,6 +153,7 @@ export default function DangerZone({
                     value={deleteRangeFrom}
                     onChange={setDeleteRangeFrom}
                     maxDate={deleteRangeTo || undefined}
+                    clearable
                     placeholder="Start date"
                     className="w-44"
                     aria-describedby={deleteRangeError ? "delete-range-error" : undefined}
@@ -167,6 +168,7 @@ export default function DangerZone({
                     value={deleteRangeTo}
                     onChange={setDeleteRangeTo}
                     minDate={deleteRangeFrom || undefined}
+                    clearable
                     placeholder="End date"
                     className="w-44"
                     aria-describedby={deleteRangeError ? "delete-range-error" : undefined}

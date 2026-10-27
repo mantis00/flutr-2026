@@ -53,6 +53,11 @@ export function isLeavingClick(click: LeavingClick): boolean {
  * Controls that swap content without navigating — Radix tabs, for one — are
  * not clicks this can judge, since they also respond to arrow keys. Those own
  * their guard via `confirmDiscardUnsavedChanges()` in their change handler.
+ *
+ * ponytail: browser Back/Forward is not covered — `popstate` fires after the
+ * entry has already changed and isn't cancelable, and the App Router has no
+ * navigation-blocking API. Blocking it needs a sentinel history entry, which
+ * leaves the Back button one press out of step for the rest of the session.
  */
 export function useUnsavedChangesWarning(enabled: boolean) {
   useEffect(() => {

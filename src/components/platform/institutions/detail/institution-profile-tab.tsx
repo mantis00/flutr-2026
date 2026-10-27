@@ -24,7 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChangesWarning } from "@/hooks/use-unsaved-changes-warning";
 import { institutionSlugSchema } from "@/lib/validation/slug";
-import { pickInstitutionUrlFields } from "@/lib/institution-form-url-fields";
+import { buildProfileUpdateBody } from "@/lib/institution-profile-body";
 
 import { InfoUse, SectionHeading } from "./section-info";
 import type { InstitutionDetail, InstitutionDetailMode } from "./institution-detail-shell";
@@ -48,7 +48,12 @@ const profileFormSchema = z.object({
   slug: institutionSlugSchema,
   main_header: z.string().max(120, "Keep the header under 120 characters").optional(),
   description: z.string().optional(),
-  primary_color: z.string().regex(HEX_REGEX, "Must be a valid hex color (#rrggbb)"),
+  // Empty means the institution has no stored theme color — kept distinct
+  // from a chosen one so saving an unrelated field can't invent a default.
+  primary_color: z
+    .string()
+    .regex(HEX_REGEX, "Must be a valid hex color (#rrggbb)")
+    .or(z.literal("")),
 
   // Media
   logo_url: z.string().url("Invalid URL").or(z.literal("")).optional(),
@@ -107,7 +112,7 @@ function defaultsFor(institution: InstitutionDetail): ProfileFormValues {
     slug: institution.slug,
     main_header: institution.main_header ?? "",
     description: institution.description ?? "",
-    primary_color: institution.theme_colors?.[0] ?? PRESET_COLORS[0].hex,
+    primary_color: institution.theme_colors?.[0] ?? "",
     logo_url: institution.logo_url ?? "",
     facility_image_url: institution.facility_image_url ?? "",
     street_address: institution.street_address,
@@ -132,11 +137,6 @@ function defaultsFor(institution: InstitutionDetail): ProfileFormValues {
   };
 }
 
-/** Blank input clears the stored value instead of leaving the old one behind. */
-function blankAsNull(value: string | undefined) {
-  return value?.trim() ? value.trim() : null;
-}
-
 export default function InstitutionProfileTab({
   institution,
   onSaved,
@@ -152,9 +152,9 @@ export default function InstitutionProfileTab({
     defaultValues: defaultsFor(institution),
   });
 
-  const initialColor = institution.theme_colors?.[0] ?? PRESET_COLORS[0].hex;
+  const initialColor = institution.theme_colors?.[0] ?? "";
   const [isCustomColor, setIsCustomColor] = useState(
-    !PRESET_COLORS.some((c) => c.hex === initialColor),
+    !!initialColor && !PRESET_COLORS.some((c) => c.hex === initialColor),
   );
   const [logoPreview, setLogoPreview] = useState(institution.logo_url ?? "");
   const [facilityPreview, setFacilityPreview] = useState(institution.facility_image_url ?? "");
@@ -187,45 +187,10 @@ export default function InstitutionProfileTab({
   const publicUrl = `${origin}/${institution.slug}`;
 
   async function onSubmit(values: ProfileFormValues) {
-    const socialLinks: Record<string, string> = {};
-    const urlFields = pickInstitutionUrlFields(
-      {
-        volunteer_url: values.volunteer_url,
-        donation_url: values.donation_url,
-      },
-      { blankAsNull: true },
-    );
-
-    if (values.social_twitter) socialLinks.twitter = values.social_twitter;
-    if (values.social_instagram) socialLinks.instagram = values.social_instagram;
-    if (values.social_facebook) socialLinks.facebook = values.social_facebook;
-    if (values.social_linkedin) socialLinks.linkedin = values.social_linkedin;
-    if (values.social_youtube) socialLinks.youtube = values.social_youtube;
-
-    const body = {
-      name: values.name,
-      ...(!isTenant ? { slug: values.slug } : {}),
-      main_header: blankAsNull(values.main_header),
-      description: blankAsNull(values.description),
-      theme_colors: [values.primary_color],
-      logo_url: blankAsNull(values.logo_url),
-      facility_image_url: blankAsNull(values.facility_image_url),
-      street_address: values.street_address,
-      ...(values.extended_address ? { extended_address: values.extended_address } : {}),
-      city: values.city,
-      state_province: values.state_province,
-      postal_code: values.postal_code,
-      country: values.country,
-      ...(values.time_zone ? { time_zone: values.time_zone } : {}),
-      ...(values.email_address ? { email_address: values.email_address } : {}),
-      ...(values.phone_number ? { phone_number: values.phone_number } : {}),
-      ...(values.website_url ? { website_url: values.website_url } : {}),
-      ...urlFields,
-      social_links: socialLinks,
-      ...(!isTenant
-        ? { stats_active: values.stats_active, iabes_member: values.iabes_member }
-        : {}),
-    };
+    const body = buildProfileUpdateBody(values, form.formState.dirtyFields, {
+      isTenant,
+      existingThemeColors: institution.theme_colors,
+    });
 
     const [url, headers]: [string, Record<string, string>] = isTenant
       ? [
@@ -392,11 +357,13 @@ export default function InstitutionProfileTab({
                 <div className="flex items-center gap-3">
                   <div
                     role="img"
-                    aria-label={`Primary color: ${primaryColor}`}
+                    aria-label={`Primary color: ${primaryColor || "not set"}`}
                     className="size-8 rounded-full border"
                     style={{ backgroundColor: isValidHex ? primaryColor : undefined }}
                   />
-                  <span className="text-muted-foreground font-mono text-sm">{primaryColor}</span>
+                  <span className="text-muted-foreground font-mono text-sm">
+                    {primaryColor || "Not set"}
+                  </span>
                 </div>
               ) : (
                 <>
@@ -409,7 +376,10 @@ export default function InstitutionProfileTab({
                         aria-pressed={!isCustomColor && primaryColor === hex}
                         onClick={() => {
                           setIsCustomColor(false);
-                          form.setValue("primary_color", hex, { shouldValidate: true });
+                          form.setValue("primary_color", hex, {
+                            shouldValidate: true,
+                            shouldDirty: true,
+                          });
                         }}
                         className={cn(
                           "size-8 rounded-full border-2 transition-all",

@@ -347,6 +347,7 @@ export default function InstitutionDataTab({
                   value={exportFrom}
                   onChange={setExportFrom}
                   maxDate={exportTo || undefined}
+                  clearable
                   placeholder="Start date"
                   aria-describedby={exportRangeError ? "export-range-error" : undefined}
                 />
@@ -360,6 +361,7 @@ export default function InstitutionDataTab({
                   value={exportTo}
                   onChange={setExportTo}
                   minDate={exportFrom || undefined}
+                  clearable
                   placeholder="End date"
                   aria-describedby={exportRangeError ? "export-range-error" : undefined}
                 />

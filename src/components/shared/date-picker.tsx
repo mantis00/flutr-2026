@@ -17,6 +17,8 @@ interface DatePickerProps {
   /** Disable dates before this YYYY-MM-DD (inclusive bound). */
   minDate?: string;
   disabled?: boolean;
+  /** Show a Clear control — for optional bounds the old native input could reset. */
+  clearable?: boolean;
   /** Form id for label association. */
   id?: string;
   placeholder?: string;
@@ -73,6 +75,7 @@ export function DatePicker({
   maxDate,
   minDate,
   disabled,
+  clearable = false,
   id,
   placeholder = "Pick a date",
   className,
@@ -118,10 +121,10 @@ export function DatePicker({
           mode="single"
           selected={selected}
           onSelect={(date) => {
-            if (date) {
-              onChange(formatDateOnly(date));
-              setOpen(false);
-            }
+            // react-day-picker reports a click on the selected day as `undefined`.
+            if (!date && !clearable) return;
+            onChange(date ? formatDateOnly(date) : "");
+            setOpen(false);
           }}
           disabled={(date) => {
             if (minDateObj && date < minDateObj) return true;
@@ -132,6 +135,22 @@ export function DatePicker({
           defaultMonth={selected ?? new Date()}
           captionLayout="dropdown"
         />
+        {clearable && selected && (
+          <div className="border-t p-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+            >
+              Clear
+            </Button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

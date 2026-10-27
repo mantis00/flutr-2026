@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { LiveStats } from "@/components/public/home/live-stats";
+import { readableAccentOnDark } from "@/lib/theme-color";
 
 interface HeroSectionProps {
   mainHeader: string | null;
@@ -29,6 +30,9 @@ export function HeroSection({
   const [headingLead, headingAccent] = mainHeader
     ? splitAccent(mainHeader)
     : ["A World of ", "Natural Wonder."];
+  // A one-word header has no plain white lead to fall back on, so the accent
+  // has to carry the whole heading over the dark hero on its own.
+  const accentColor = readableAccentOnDark(primaryColor);
 
   return (
     <section aria-labelledby="hero-heading" className="relative w-full">
@@ -103,7 +107,7 @@ export function HeroSection({
             className="max-w-lg text-3xl leading-tight font-bold text-white sm:text-4xl lg:text-6xl"
           >
             {headingLead}
-            <span className="font-bold italic" style={{ color: primaryColor }}>
+            <span className="font-bold italic" style={{ color: accentColor }}>
               {headingAccent}
             </span>
           </h1>
