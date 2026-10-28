@@ -11,19 +11,23 @@ import {
 } from "@/components/shared/species-search-toolbar";
 import { useSpeciesSearch, type SpeciesItem } from "@/hooks/use-species-search";
 import { SpeciesThumbnailStrip } from "@/components/tenant/releases/species-thumbnail-strip";
+import {
+  computeReleaseEditBounds,
+  computeReleaseEditLossFieldCap,
+  sumReleaseEditLosses,
+  ZERO_RELEASE_EDIT_LOSSES,
+  type ReleaseEditLossField,
+  type ReleaseEditLossValues,
+} from "@/components/tenant/releases/release-edit-capacity";
 
-import { type ShipmentItemRow } from "@/components/tenant/shipments/types";
+import { isGoodEmergenceTracked, type ShipmentItemRow } from "@/components/tenant/shipments/types";
 
 export type ReleaseEditQuantities = Record<number, number>;
 
-export type ReleaseEditLossField =
-  | "damagedInTransit"
-  | "diseasedInTransit"
-  | "parasite"
-  | "nonEmergence"
-  | "poorEmergence";
-
-export type ReleaseEditLossValues = Record<ReleaseEditLossField, number>;
+export type {
+  ReleaseEditLossField,
+  ReleaseEditLossValues,
+} from "@/components/tenant/releases/release-edit-capacity";
 export type ReleaseEditLossesByItem = Record<number, ReleaseEditLossValues>;
 
 interface ReleaseEditComposerProps {
@@ -39,14 +43,6 @@ interface ReleaseEditComposerProps {
 
 type ComposerSpeciesItem = SpeciesItem & ShipmentItemRow;
 
-const ZERO_LOSSES: ReleaseEditLossValues = {
-  damagedInTransit: 0,
-  diseasedInTransit: 0,
-  parasite: 0,
-  nonEmergence: 0,
-  poorEmergence: 0,
-};
-
 const LOSS_FIELDS: Array<{ field: ReleaseEditLossField; label: string; shortLabel: string }> = [
   { field: "damagedInTransit", label: "Damaged", shortLabel: "Damaged" },
   { field: "diseasedInTransit", label: "Diseased", shortLabel: "Diseased" },
@@ -59,17 +55,7 @@ function getLossValues(
   map: ReleaseEditLossesByItem,
   shipmentItemId: number,
 ): ReleaseEditLossValues {
-  return map[shipmentItemId] ?? ZERO_LOSSES;
-}
-
-function sumLosses(values: ReleaseEditLossValues) {
-  return (
-    values.damagedInTransit +
-    values.diseasedInTransit +
-    values.parasite +
-    values.nonEmergence +
-    values.poorEmergence
-  );
+  return map[shipmentItemId] ?? ZERO_RELEASE_EDIT_LOSSES;
 }
 
 function clampNonNegativeInteger(next: number) {
@@ -77,79 +63,13 @@ function clampNonNegativeInteger(next: number) {
   return Math.max(0, Math.floor(next));
 }
 
-/**
- * Compute the max in-flight quantity for this edit row so the UI reflects the
- * same core invariant the backend validates after applying event-level loss
- * deltas: desired in-flight must be <= remaining for the shipment item.
- */
-function computeReleaseCap(params: {
-  item: ShipmentItemRow;
-  desiredLosses: ReleaseEditLossValues;
-  originalLosses: ReleaseEditLossValues;
-  originalRelease: number;
-}) {
-  const { item, desiredLosses, originalLosses, originalRelease } = params;
-
-  const currentShipmentLossTotal =
-    item.emergedInTransit +
-    item.damagedInTransit +
-    item.diseasedInTransit +
-    item.parasite +
-    item.nonEmergence +
-    item.poorEmergence;
-
-  const originalEventLossTotal = sumLosses(originalLosses);
-  const desiredEventLossTotal = sumLosses(desiredLosses);
-  const shipmentLossesOutsideEvent = Math.max(0, currentShipmentLossTotal - originalEventLossTotal);
-  const releasedOutsideEvent = Math.max(0, item.inFlightQuantity - originalRelease);
-
-  const cap =
-    item.numberReceived - shipmentLossesOutsideEvent - desiredEventLossTotal - releasedOutsideEvent;
-
-  return Math.max(0, cap);
-}
-
-/**
- * Compute a per-loss-field cap that keeps the row internally consistent with
- * the selected in-flight quantity for this release event.
- */
-function computeLossFieldCap(params: {
-  item: ShipmentItemRow;
-  field: ReleaseEditLossField;
-  desiredRelease: number;
-  desiredLosses: ReleaseEditLossValues;
-  originalLosses: ReleaseEditLossValues;
-  originalRelease: number;
-}) {
-  const { item, field, desiredRelease, desiredLosses, originalLosses, originalRelease } = params;
-
-  const currentShipmentLossTotal =
-    item.emergedInTransit +
-    item.damagedInTransit +
-    item.diseasedInTransit +
-    item.parasite +
-    item.nonEmergence +
-    item.poorEmergence;
-
-  const originalEventLossTotal = sumLosses(originalLosses);
-  const shipmentLossesOutsideEvent = Math.max(0, currentShipmentLossTotal - originalEventLossTotal);
-  const releasedOutsideEvent = Math.max(0, item.inFlightQuantity - originalRelease);
-
-  const desiredLossesExcludingField = sumLosses(desiredLosses) - desiredLosses[field];
-  const cap =
-    item.numberReceived -
-    releasedOutsideEvent -
-    shipmentLossesOutsideEvent -
-    desiredRelease -
-    desiredLossesExcludingField;
-
-  return Math.max(0, cap);
-}
-
 interface CompactStepperProps {
   label: string;
   value: number;
   cap: number;
+  min?: number;
+  disabled?: boolean;
+  invalid?: boolean;
   ariaLabel: string;
   ariaDescribedBy?: string;
   onChange: (next: number) => void;
@@ -159,11 +79,14 @@ function CompactStepper({
   label,
   value,
   cap,
+  min = 0,
+  disabled = false,
+  invalid = false,
   ariaLabel,
   ariaDescribedBy,
   onChange,
 }: CompactStepperProps) {
-  const clamp = (next: number) => Math.max(0, Math.min(cap, clampNonNegativeInteger(next)));
+  const clamp = (next: number) => Math.max(min, Math.min(cap, clampNonNegativeInteger(next)));
 
   return (
     <div className="space-y-1">
@@ -175,7 +98,7 @@ function CompactStepper({
           variant="outline"
           className="size-8 shrink-0"
           onClick={() => onChange(clamp(value + 1))}
-          disabled={value >= cap}
+          disabled={disabled || value >= cap}
           aria-label={`Increase ${ariaLabel}`}
         >
           <Plus className="size-3.5" />
@@ -183,10 +106,13 @@ function CompactStepper({
         <Input
           type="number"
           inputMode="numeric"
-          min={0}
+          min={min}
           max={cap}
           step={1}
           value={value}
+          readOnly={disabled}
+          aria-disabled={disabled}
+          aria-invalid={invalid}
           aria-label={ariaLabel}
           aria-describedby={ariaDescribedBy}
           className="h-8 w-full min-w-16 px-1 text-center text-sm tabular-nums"
@@ -198,7 +124,7 @@ function CompactStepper({
           variant="outline"
           className="size-8 shrink-0"
           onClick={() => onChange(clamp(value - 1))}
-          disabled={value <= 0}
+          disabled={disabled || value <= min}
           aria-label={`Decrease ${ariaLabel}`}
         >
           <Minus className="size-3.5" />
@@ -275,13 +201,23 @@ export function ReleaseEditComposer({
               const originalRelease = originalReleaseValues[item.id] ?? 0;
               const desiredLosses = getLossValues(lossValues, item.id);
               const originalLosses = getLossValues(originalLossValues, item.id);
-              const desiredLossTotal = sumLosses(desiredLosses);
-              const releaseCap = computeReleaseCap({
+              const desiredLossTotal = sumReleaseEditLosses(desiredLosses);
+              const releaseBounds = computeReleaseEditBounds({
                 item,
                 desiredLosses,
                 originalLosses,
                 originalRelease,
               });
+              const goodEmergenceTracked = isGoodEmergenceTracked(item);
+              const untrackedDescribedBy = `release-edit-untracked-${item.id}`;
+              const infeasibleDescribedBy = `release-edit-infeasible-${item.id}`;
+              const releaseDescribedBy = [
+                errorMessageId,
+                !goodEmergenceTracked ? untrackedDescribedBy : undefined,
+                !releaseBounds.isFeasible ? infeasibleDescribedBy : undefined,
+              ]
+                .filter(Boolean)
+                .join(" ");
 
               return (
                 <li
@@ -298,21 +234,36 @@ export function ReleaseEditComposer({
                       <div className="text-muted-foreground text-[11px]">
                         {desiredRelease} released · {desiredLossTotal} losses
                       </div>
+                      {!goodEmergenceTracked && (
+                        <p id={untrackedDescribedBy} className="text-muted-foreground text-[11px]">
+                          Released is unknown for this historical species. This event&apos;s release
+                          quantity cannot be changed while the aggregate remains unknown.
+                        </p>
+                      )}
+                      {!releaseBounds.isFeasible && (
+                        <p id={infeasibleDescribedBy} className="text-destructive text-[11px]">
+                          Shipment Received/loss accounting must be corrected before this Released
+                          quantity can be edited.
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <CompactStepper
                     label="Released"
                     value={desiredRelease}
-                    cap={releaseCap}
+                    cap={releaseBounds.isFeasible ? releaseBounds.max : desiredRelease}
+                    min={releaseBounds.isFeasible ? releaseBounds.min : desiredRelease}
+                    disabled={!goodEmergenceTracked || !releaseBounds.isFeasible}
+                    invalid={!releaseBounds.isFeasible}
                     ariaLabel={`Released quantity for ${item.commonName}`}
-                    ariaDescribedBy={errorMessageId}
+                    ariaDescribedBy={releaseDescribedBy || undefined}
                     onChange={(next) => onReleaseChange(item.id, next)}
                   />
 
                   {LOSS_FIELDS.map(({ field, label }) => {
                     const value = desiredLosses[field];
-                    const fieldCap = computeLossFieldCap({
+                    const fieldCap = computeReleaseEditLossFieldCap({
                       item,
                       field,
                       desiredRelease,

@@ -81,7 +81,6 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
         baseShipmentItemRow({ id: 101, good_emergence: 20 }),
         baseShipmentItemRow({ id: 102, good_emergence: 5 }),
       ], // lockedItems
-      [], // releasedRows (nothing released yet)
     ]);
     mockSequence(tx.insert, [
       [
@@ -121,7 +120,6 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
         baseShipmentItemRow({ id: 101, good_emergence: null }),
         baseShipmentItemRow({ id: 102, good_emergence: 5 }),
       ],
-      [],
     ]);
 
     await expect(
@@ -145,7 +143,7 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: SHIPMENT_ID }],
       [baseShipmentItemRow({ id: 101, good_emergence: null, poor_emergence: 0 })], // untouched for good_emergence
-      [],
+      [], // grouped actual in_flight totals for loss_updates items (101 has none)
     ]);
     const [lossPatchChain] = mockSequence(tx.update, [undefined]);
     mockSequence(tx.insert, [
@@ -173,6 +171,35 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
       expect.objectContaining({ good_emergence: expect.anything() }),
     );
   });
+
+  it("rejects a loss_updates correction that satisfies the aggregate baseline but violates the actual in_flight floor", async () => {
+    const tx = setupTx();
+
+    // received 100 / losses 0 / good_emergence 10 / actual sum(in_flight) 40
+    // (40 butterflies genuinely released by other, prior release events).
+    // Setting poor_emergence to 90 passes the good_emergence-only check
+    // (100 - 90 - 10 = 0, not negative) but leaves only 10 available against
+    // 40 genuinely in flight — physically impossible.
+    mockSequence(tx.select, [
+      [{ id: SHIPMENT_ID }],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+      [{ shipmentItemId: 101, total: 40 }],
+    ]);
+    mockSequence(tx.update, [undefined]);
+
+    await expect(
+      createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+        items: [],
+        loss_updates: [{ shipment_item_id: 101, poor_emergence: 90 }],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+
+    // The loss-column write happens inside the same transaction as the
+    // validation that rejects it, so the throw rolls the whole transaction
+    // back; no release event is ever created.
+    expect(tx.update).toHaveBeenCalledTimes(1);
+    expect(tx.insert).not.toHaveBeenCalled();
+  });
 });
 
 describe("updateReleaseEventItems — good_emergence dual-write", () => {
@@ -186,7 +213,6 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
       [{ id: 9, shipmentItemId: 101, quantity: 10 }], // existingInFlightRows
       [], // existingLossRows
       [baseShipmentItemRow({ id: 101, good_emergence: 20 })], // lockedItems
-      [{ shipment_item_id: 101, total: 10 }], // releasedTotalsRows
     ]);
     const [shipmentChain, inFlightChain] = mockSequence(tx.update, [undefined, undefined]);
 
@@ -199,6 +225,45 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
     expect(inFlightChain.set).toHaveBeenCalledWith(expect.objectContaining({ quantity: 15 }));
   });
 
+  it("preserves a zero baseline when aggregate Released initially equals the event quantity", async () => {
+    const tx = setupTx();
+
+    mockSequence(tx.select, [
+      [releaseEventRow],
+      [{ id: 9, shipmentItemId: 101, quantity: 10 }],
+      [],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+    ]);
+    const [shipmentChain, inFlightChain] = mockSequence(tx.update, [undefined, undefined]);
+
+    await updateReleaseEventItems(INSTITUTION_ID, RELEASE_EVENT_ID, {
+      items: [{ shipment_item_id: 101, quantity: 15 }],
+    });
+
+    expect(shipmentChain.set).toHaveBeenCalledWith(expect.objectContaining({ good_emergence: 15 }));
+    expect(inFlightChain.set).toHaveBeenCalledWith(expect.objectContaining({ quantity: 15 }));
+  });
+
+  it("preserves a negative baseline when the event exceeds aggregate Released", async () => {
+    const tx = setupTx();
+
+    mockSequence(tx.select, [
+      [releaseEventRow],
+      [{ id: 9, shipmentItemId: 101, quantity: 10 }],
+      [],
+      [baseShipmentItemRow({ id: 101, good_emergence: 8 })],
+    ]);
+    const [shipmentChain, inFlightChain] = mockSequence(tx.update, [undefined, undefined]);
+
+    await updateReleaseEventItems(INSTITUTION_ID, RELEASE_EVENT_ID, {
+      items: [{ shipment_item_id: 101, quantity: 5 }],
+    });
+
+    // Baseline remains -2: 8 aggregate - 10 event before, 3 - 5 after.
+    expect(shipmentChain.set).toHaveBeenCalledWith(expect.objectContaining({ good_emergence: 3 }));
+    expect(inFlightChain.set).toHaveBeenCalledWith(expect.objectContaining({ quantity: 5 }));
+  });
+
   it("edit decrease: applies the same negative delta to good_emergence", async () => {
     const tx = setupTx();
 
@@ -207,7 +272,6 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
       [{ id: 9, shipmentItemId: 101, quantity: 15 }],
       [],
       [baseShipmentItemRow({ id: 101, good_emergence: 30 })],
-      [{ shipment_item_id: 101, total: 15 }],
     ]);
     const [shipmentChain, inFlightChain] = mockSequence(tx.update, [undefined, undefined]);
 
@@ -232,10 +296,6 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
       [
         baseShipmentItemRow({ id: 101, good_emergence: 30, number_received: 50 }),
         baseShipmentItemRow({ id: 102, good_emergence: 8, number_received: 50 }),
-      ],
-      [
-        { shipment_item_id: 101, total: 10 },
-        { shipment_item_id: 102, total: 5 },
       ],
     ]);
     const [shipmentChain] = mockSequence(tx.update, [undefined]);
@@ -263,7 +323,6 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
       [], // no existing in-flight rows at all
       [], // no existing loss rows
       [baseShipmentItemRow({ id: 103, good_emergence: 0 })],
-      [], // no in_flight rows yet for this item
     ]);
     const [shipmentChain] = mockSequence(tx.update, [undefined]);
     const [insertChain] = mockSequence(tx.insert, [undefined]);
@@ -297,7 +356,7 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
         },
       ],
       [baseShipmentItemRow({ id: 101, good_emergence: null, damaged_in_transit: 0 })], // NULL good_emergence, never touched
-      [], // no in_flight totals for this item
+      [], // grouped actual in_flight totals for lossChangedItemIds (101 has none)
     ]);
     // Two updates: the shipment_items absolute-loss-total patch, and the
     // separate release_event_losses event-attribution row update.
@@ -402,7 +461,7 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
         },
       ],
       [baseShipmentItemRow({ id: 101, good_emergence: 20, damaged_in_transit: 0 })],
-      [{ shipment_item_id: 101, total: 10 }],
+      [{ shipmentItemId: 101, total: 10 }], // grouped actual in_flight total (this event's own 10, no others)
     ]);
     // Three updates: shipment_items combined patch, in_flight quantity, and
     // the separate release_event_losses event-attribution row.
@@ -434,6 +493,46 @@ describe("updateReleaseEventItems — good_emergence dual-write", () => {
     expect(eventLossChain.set).toHaveBeenCalledWith(
       expect.objectContaining({ damaged_in_transit: 2 }),
     );
+  });
+
+  it("rejects a loss edit that satisfies the aggregate baseline but violates the actual in_flight floor", async () => {
+    const tx = setupTx();
+
+    // This event's own in_flight quantity (10) is left unchanged, and the
+    // aggregate good_emergence (10) matches it exactly — the aggregate check
+    // alone would pass. But 40 butterflies are actually in flight across all
+    // events for this item (30 held by other events), so raising
+    // poor_emergence to 85 would drop post-loss availability (15) below that
+    // real physical total.
+    mockSequence(tx.select, [
+      [releaseEventRow],
+      [{ id: 9, shipmentItemId: 101, quantity: 10 }],
+      [],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+      [{ shipmentItemId: 101, total: 40 }],
+    ]);
+
+    await expect(
+      updateReleaseEventItems(INSTITUTION_ID, RELEASE_EVENT_ID, {
+        items: [{ shipment_item_id: 101, quantity: 10 }],
+        losses: [
+          {
+            shipment_item_id: 101,
+            damaged_in_transit: 0,
+            diseased_in_transit: 0,
+            parasite: 0,
+            non_emergence: 0,
+            poor_emergence: 85,
+          },
+        ],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.QUANTITY_EXCEEDS_REMAINING);
+
+    // All writes happen after both validations in this function, so a
+    // rejection here leaves no partial write behind.
+    expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.insert).not.toHaveBeenCalled();
+    expect(tx.delete).not.toHaveBeenCalled();
   });
 });
 
@@ -789,7 +888,6 @@ describe("createInFlightForRelease — good_emergence dual-write", () => {
       [{ id: RELEASE_EVENT_ID, shipmentId: SHIPMENT_ID }],
       [baseShipmentItemRow({ id: 101, shipment_id: SHIPMENT_ID, good_emergence: 10 })],
       [], // no existing in_flight row for this release/item
-      [{ quantity: 0 }], // sumReleasedForItem
     ]);
     const [inFlightChain] = mockSequence(tx.insert, [
       [{ id: 1, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 5 }],
@@ -825,7 +923,6 @@ describe("createInFlightForRelease — good_emergence dual-write", () => {
       [{ id: RELEASE_EVENT_ID, shipmentId: SHIPMENT_ID }],
       [baseShipmentItemRow({ id: 101, shipment_id: SHIPMENT_ID, good_emergence: null })],
       [],
-      [{ quantity: 0 }],
     ]);
 
     await expect(
@@ -847,7 +944,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     const [targetChain] = mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 5 }],
       [baseShipmentItemRow({ id: 101, good_emergence: 20 })],
-      [{ quantity: 0 }],
     ]);
     const inFlightChain = createChainable([
       { id: 9, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 9 },
@@ -870,7 +966,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 5 }],
       [baseShipmentItemRow({ id: 101, good_emergence: 20 })],
-      [{ quantity: 0 }],
     ]);
     const inFlightChain = createChainable([
       { id: 9, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 9 },
@@ -889,7 +984,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 9 }],
       [baseShipmentItemRow({ id: 101, good_emergence: 24 })],
-      [{ quantity: 0 }],
     ]);
     const inFlightChain = createChainable([
       { id: 9, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 5 },
@@ -908,7 +1002,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 9 }],
       [baseShipmentItemRow({ id: 101, good_emergence: 2 })], // numeric, but too low for a -4 delta
-      [{ quantity: 0 }],
     ]);
 
     await expect(updateInFlightQuantity(INSTITUTION_ID, 9, { quantity: 5 })).rejects.toThrow(
@@ -924,7 +1017,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 9 }],
       [baseShipmentItemRow({ id: 101, good_emergence: null })],
-      [{ quantity: 0 }],
     ]);
 
     await expect(updateInFlightQuantity(INSTITUTION_ID, 9, { quantity: 5 })).rejects.toThrow(
@@ -940,7 +1032,6 @@ describe("updateInFlightQuantity — good_emergence dual-write", () => {
     mockSequence(tx.select, [
       [{ id: 9, shipmentItemId: 101, quantity: 10 }],
       [baseShipmentItemRow({ id: 101, good_emergence: null })],
-      [{ quantity: 0 }],
     ]);
     const inFlightChain = createChainable([
       { id: 9, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 10 },

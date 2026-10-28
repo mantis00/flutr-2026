@@ -25,6 +25,10 @@ import {
   type ReleaseEditLossValues,
   type ReleaseEditQuantities,
 } from "@/components/tenant/releases/release-edit-composer";
+import {
+  computeReleaseEditBounds,
+  ZERO_RELEASE_EDIT_LOSSES,
+} from "@/components/tenant/releases/release-edit-capacity";
 import type {
   ReleaseEventDetail,
   ShipmentDetailResponse,
@@ -178,6 +182,20 @@ export default function EditReleasePage() {
     return shipment.items.filter((item) => idSet.has(item.id));
   }, [shipment, trackedItemIds]);
 
+  const hasInfeasibleReleaseEditRange = useMemo(
+    () =>
+      trackedItems.some((item) => {
+        const bounds = computeReleaseEditBounds({
+          item,
+          desiredLosses: lossValues[item.id] ?? ZERO_RELEASE_EDIT_LOSSES,
+          originalLosses: originalLossValues[item.id] ?? ZERO_RELEASE_EDIT_LOSSES,
+          originalRelease: originalReleaseValues[item.id] ?? 0,
+        });
+        return !bounds.isFeasible;
+      }),
+    [lossValues, originalLossValues, originalReleaseValues, trackedItems],
+  );
+
   const totalReleased = useMemo(
     () => Object.values(releaseValues).reduce((acc, value) => acc + (value || 0), 0),
     [releaseValues],
@@ -202,6 +220,12 @@ export default function EditReleasePage() {
     if (!release) return;
     if (trackedItems.length === 0) {
       setErrorMessage("This release has no editable rows.");
+      return;
+    }
+    if (hasInfeasibleReleaseEditRange) {
+      setErrorMessage(
+        "Shipment Received/loss accounting must be corrected before this release can be saved.",
+      );
       return;
     }
 
@@ -393,7 +417,12 @@ export default function EditReleasePage() {
           <Button
             size="lg"
             onClick={handleSave}
-            disabled={saving || deleting || (totalReleased === 0 && totalLosses === 0)}
+            disabled={
+              saving ||
+              deleting ||
+              hasInfeasibleReleaseEditRange ||
+              (totalReleased === 0 && totalLosses === 0)
+            }
           >
             {saving ? "Saving…" : "Save changes"}
           </Button>

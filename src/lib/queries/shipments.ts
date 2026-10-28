@@ -16,6 +16,7 @@ import type { CreateShipmentBody, UpdateShipmentBody } from "@/lib/validation/sh
 
 export const SHIPMENT_ERRORS = {
   CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
+  GOOD_EMERGENCE_EXCEEDS_AVAILABLE: "GOOD_EMERGENCE_EXCEEDS_AVAILABLE",
   INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
   SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
 } as const;
@@ -39,7 +40,8 @@ export function parseDateOnlyToUtcExclusiveEnd(value: string): Date {
 
 /**
  * List shipments for a tenant (paginated). Each row carries a `remaining`
- * count and an `isCompleted` flag derived from shipment items + in_flight.
+ * count and an `isCompleted` flag derived from shipment-item losses and
+ * authoritative aggregate `good_emergence` values.
  */
 export async function listShipments(institutionId: number, page: number, limit: number) {
   const offset = (page - 1) * limit;
@@ -96,25 +98,21 @@ export async function listShipments(institutionId: number, page: number, limit: 
 }
 
 /**
- * Pure helper that turns the raw aggregation rows from the DB into the
- * shipment-id → {remaining, isCompleted} map. Extracted so the completion
- * logic (clamping, empty-shipment defaulting, in_flight subtraction) can be
- * unit-tested without going through drizzle.
+ * Pure helper that turns the raw per-shipment aggregation rows from the DB
+ * into the shipment-id → {remaining, isCompleted} map. Extracted so the
+ * completion logic (clamping, empty-shipment defaulting) can be unit-tested
+ * without going through drizzle. `row.remaining` is expected to already be
+ * the per-item-clamped, NULL-aware sum computed in SQL (see
+ * `getShipmentCompletionMap`).
  */
 export function buildShipmentCompletionMap(
-  itemRows: { shipmentId: number; itemCount: number; grossAvailable: number | string }[],
-  releasedRows: { shipmentId: number; released: number | string }[],
+  itemRows: { shipmentId: number; itemCount: number; remaining: number | string }[],
   shipmentIds?: number[],
 ): Map<number, { remaining: number; isCompleted: boolean }> {
-  const releasedByShipmentId = new Map(
-    releasedRows.map((row) => [row.shipmentId, Number(row.released)]),
-  );
-
   const map = new Map<number, { remaining: number; isCompleted: boolean }>();
 
   for (const row of itemRows) {
-    const released = releasedByShipmentId.get(row.shipmentId) ?? 0;
-    const remaining = Math.max(0, Number(row.grossAvailable) - released);
+    const remaining = Math.max(0, Number(row.remaining));
     map.set(row.shipmentId, {
       remaining,
       isCompleted: row.itemCount > 0 && remaining === 0,
@@ -139,7 +137,12 @@ export function buildShipmentCompletionMap(
  *
  * Per shipment item, "remaining" = number_received - (emerged_in_transit
  * + damaged + diseased + parasite + non_emergence + poor_emergence)
- * - sum(in_flight.quantity).
+ * - good_emergence, clamped at 0. A NULL `good_emergence` (historical,
+ * outcome untracked) forces that item's remaining to 0 instead — it reads as
+ * accounted-for/complete rather than showing a false "still has butterflies"
+ * count. Clamping/NULL-handling happens per item in SQL (a shipment can mix
+ * tracked and untracked items) before summing to the shipment level.
+ *
  * A shipment is "completed" when remaining sums to zero across all of its
  * items AND it has at least one item (an empty shipment is treated as
  * in-progress so users see something to fill in).
@@ -160,48 +163,32 @@ export async function getShipmentCompletionMap(
     itemConditions.push(inArray(shipment_items.shipment_id, shipmentIds));
   }
 
-  // Per-shipment item totals (received minus losses), grouped in SQL.
+  // Per-item remaining (NULL good_emergence -> 0, else clamped at 0), summed
+  // per shipment in SQL.
   const itemRows = await db
     .select({
       shipmentId: shipment_items.shipment_id,
       itemCount: count(shipment_items.id),
-      grossAvailable: sql<number>`coalesce(sum(
-        ${shipment_items.number_received}
-        - ${shipment_items.emerged_in_transit}
-        - ${shipment_items.damaged_in_transit}
-        - ${shipment_items.diseased_in_transit}
-        - ${shipment_items.parasite}
-        - ${shipment_items.non_emergence}
-        - ${shipment_items.poor_emergence}
-      ), 0)::int`.as("gross_available"),
+      remaining: sql<number>`coalesce(sum(
+        CASE WHEN ${shipment_items.good_emergence} IS NULL THEN 0
+        ELSE GREATEST(0,
+          ${shipment_items.number_received}
+          - ${shipment_items.emerged_in_transit}
+          - ${shipment_items.damaged_in_transit}
+          - ${shipment_items.diseased_in_transit}
+          - ${shipment_items.parasite}
+          - ${shipment_items.non_emergence}
+          - ${shipment_items.poor_emergence}
+          - ${shipment_items.good_emergence}
+        )
+        END
+      ), 0)::int`.as("remaining"),
     })
     .from(shipment_items)
     .where(and(...itemConditions))
     .groupBy(shipment_items.shipment_id);
 
-  // Per-shipment in_flight totals via shipment_items join.
-  const releasedConditions = [eq(in_flight.institution_id, institutionId)];
-  if (shipmentIds) {
-    releasedConditions.push(inArray(shipment_items.shipment_id, shipmentIds));
-  }
-
-  const releasedRows = await db
-    .select({
-      shipmentId: shipment_items.shipment_id,
-      released: sql<number>`coalesce(sum(${in_flight.quantity}), 0)::int`.as("released_total"),
-    })
-    .from(in_flight)
-    .innerJoin(
-      shipment_items,
-      and(
-        eq(shipment_items.id, in_flight.shipment_item_id),
-        eq(shipment_items.institution_id, in_flight.institution_id),
-      ),
-    )
-    .where(and(...releasedConditions))
-    .groupBy(shipment_items.shipment_id);
-
-  return buildShipmentCompletionMap(itemRows, releasedRows, shipmentIds);
+  return buildShipmentCompletionMap(itemRows, shipmentIds);
 }
 
 /**
@@ -240,6 +227,7 @@ export async function getShipmentWithItems(institutionId: number, shipmentId: nu
       parasite: shipment_items.parasite,
       nonEmergence: shipment_items.non_emergence,
       poorEmergence: shipment_items.poor_emergence,
+      goodEmergence: shipment_items.good_emergence,
 
       // ::int cast is required: PG sum() over integer returns bigint, which
       // node-postgres serializes as a string. Without the cast, JS code that
@@ -458,7 +446,10 @@ export async function updateShipment(
       for (const item of payload.update_items) {
         // Lock the row to serialize with concurrent release creation (which also locks shipment_items)
         const lockedRows = await tx
-          .select({ id: shipment_items.id })
+          .select({
+            id: shipment_items.id,
+            goodEmergence: shipment_items.good_emergence,
+          })
           .from(shipment_items)
           .where(
             and(
@@ -484,6 +475,7 @@ export async function updateShipment(
           );
 
         const inFlightTotal = inFlightRow?.total ?? 0;
+        const goodEmergence = lockedRows[0].goodEmergence;
 
         const availableAfterUpdate =
           item.number_received -
@@ -493,6 +485,10 @@ export async function updateShipment(
           item.parasite -
           item.non_emergence -
           item.poor_emergence;
+
+        if (goodEmergence !== null && availableAfterUpdate < goodEmergence) {
+          throw new Error(SHIPMENT_ERRORS.GOOD_EMERGENCE_EXCEEDS_AVAILABLE);
+        }
 
         if (availableAfterUpdate < inFlightTotal) {
           throw new Error(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);

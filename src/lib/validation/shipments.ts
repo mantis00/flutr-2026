@@ -34,6 +34,37 @@ export type ShipmentIdParams = z.infer<typeof shipmentIdParamsSchema>;
  * ---------------------------
  */
 
+type ShipmentItemAccountingInput = {
+  number_received: number;
+  emerged_in_transit: number;
+  damaged_in_transit: number;
+  diseased_in_transit: number;
+  parasite: number;
+  non_emergence: number;
+  poor_emergence: number;
+};
+
+function validateLossesWithinReceived(
+  item: ShipmentItemAccountingInput,
+  ctx: z.RefinementCtx,
+): void {
+  const totalLosses =
+    item.emerged_in_transit +
+    item.damaged_in_transit +
+    item.diseased_in_transit +
+    item.parasite +
+    item.non_emergence +
+    item.poor_emergence;
+
+  if (totalLosses > item.number_received) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Total losses cannot exceed number received",
+      path: [],
+    });
+  }
+}
+
 const shipmentItemCreateSchema = z
   .object({
     butterfly_species_id: z.number({ message: "Butterfly species is required" }).int().positive(),
@@ -45,7 +76,8 @@ const shipmentItemCreateSchema = z
     non_emergence: z.number().int().min(0).default(0),
     poor_emergence: z.number().int().min(0).default(0),
   })
-  .strict();
+  .strict()
+  .superRefine(validateLossesWithinReceived);
 
 const shipmentDateOnlySchema = z
   .string()
@@ -114,7 +146,8 @@ const shipmentItemUpdateSchema = z
     non_emergence: z.number().int().min(0),
     poor_emergence: z.number().int().min(0),
   })
-  .strict();
+  .strict()
+  .superRefine(validateLossesWithinReceived);
 
 /**
  * ---------------------------

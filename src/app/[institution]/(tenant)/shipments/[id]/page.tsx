@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/table";
 import {
   computeItemRemaining,
+  computeShipmentReleasedTotal,
+  formatReleasedQuantity,
   type ReleaseHistoryRow,
   type ShipmentDetailResponse,
   type ShipmentItemRow,
@@ -181,7 +183,7 @@ export default function ShipmentDetailPage() {
         item.poorEmergence,
       0,
     );
-    const totalReleased = items.reduce((acc, item) => acc + item.inFlightQuantity, 0);
+    const totalReleased = computeShipmentReleasedTotal(items);
     const remaining = items.reduce((acc, item) => acc + computeItemRemaining(item), 0);
     return {
       totalReceived,
@@ -285,6 +287,7 @@ export default function ShipmentDetailPage() {
             nonEmergence: 0,
             poorEmergence: 0,
             inFlightQuantity: 0,
+            goodEmergence: 0,
           };
         });
       return [...current, ...additions];
@@ -366,7 +369,11 @@ export default function ShipmentDetailPage() {
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
-        setErrorMessage(result?.error?.message ?? "Unable to save changes.");
+        // A field-level validation issue (e.g. "Total losses cannot exceed
+        // number received") is more actionable than the generic top-level
+        // message, so prefer it when present.
+        const detailMessage: string | undefined = result?.error?.details?.[0]?.message;
+        setErrorMessage(detailMessage ?? result?.error?.message ?? "Unable to save changes.");
         return;
       }
       setEditing(false);
@@ -482,7 +489,7 @@ export default function ShipmentDetailPage() {
         </Card>
         <SummaryCard label="Received" value={totals.totalReceived} />
         <SummaryCard label="Losses" value={totals.totalLosses} />
-        <SummaryCard label="Released" value={totals.totalReleased} />
+        <SummaryCard label="Released" value={formatReleasedQuantity(totals.totalReleased)} />
       </div>
 
       {errorMessage && (
@@ -647,7 +654,7 @@ export default function ShipmentDetailPage() {
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: number }) {
+function SummaryCard({ label, value }: { label: string; value: number | string }) {
   return (
     <Card className="gap-1 py-3">
       <CardHeader className="px-3">

@@ -14,7 +14,11 @@ import { useSpeciesSearch, type SpeciesItem } from "@/hooks/use-species-search";
 import { SpeciesThumbnailStrip } from "@/components/tenant/releases/species-thumbnail-strip";
 import { cn } from "@/lib/utils";
 
-import { computeItemRemaining, type ShipmentItemRow } from "@/components/tenant/shipments/types";
+import {
+  computeItemReleaseCap,
+  isGoodEmergenceTracked,
+  type ShipmentItemRow,
+} from "@/components/tenant/shipments/types";
 
 export const RELEASE_CATEGORIES = [
   "goodEmergence",
@@ -89,7 +93,7 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
         scientific_name: item.scientificName,
         common_name: item.commonName,
         family: "",
-        baseRemaining: computeItemRemaining(item),
+        baseRemaining: computeItemReleaseCap(item),
       })),
     [items],
   );
@@ -153,6 +157,8 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
             const allocatedAcrossCategories = sumValues(itemValues);
             const remainingHeadroom = Math.max(0, item.baseRemaining - allocatedAcrossCategories);
             const headroomDescribedBy = `release-headroom-${item.id}`;
+            const goodEmergenceTracked = isGoodEmergenceTracked(item);
+            const untrackedDescribedBy = `release-untracked-${item.id}`;
 
             return (
               <li
@@ -171,6 +177,12 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
                       remaining={item.baseRemaining}
                       allocated={allocatedAcrossCategories}
                     />
+                    {!goodEmergenceTracked && (
+                      <p id={untrackedDescribedBy} className="text-muted-foreground mt-1 text-xs">
+                        Released is unknown for this historical species. Losses can still be
+                        recorded here, but a release quantity cannot be added.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -182,13 +194,22 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
                 >
                   {visibleCategories.map((category) => {
                     const ownValue = itemValues?.[category] ?? 0;
+                    // Good Emergence is the only category that becomes a real
+                    // release quantity; the rest are always loss_updates. An
+                    // untracked (null good_emergence) item can still take
+                    // loss-only corrections here — the server permits that —
+                    // but must never accept a nonzero Good Emergence
+                    // allocation, since that's guaranteed to be rejected with
+                    // GOOD_EMERGENCE_UNTRACKED at submit time. Capping at 0
+                    // here (rather than relying on the submit-time check)
+                    // keeps the UI from ever offering something it can't save.
+                    const categoryBlocked = category === "goodEmergence" && !goodEmergenceTracked;
                     // Cap = baseRemaining minus everything allocated elsewhere.
                     // Adding back ownValue lets the user adjust their own field
                     // without bumping into a self-imposed ceiling.
-                    const cap = Math.max(
-                      0,
-                      item.baseRemaining - allocatedAcrossCategories + ownValue,
-                    );
+                    const cap = categoryBlocked
+                      ? 0
+                      : Math.max(0, item.baseRemaining - allocatedAcrossCategories + ownValue);
                     return (
                       <CategoryStepper
                         key={category}
@@ -197,7 +218,11 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
                         cap={cap}
                         onChange={(next) => onChange(item.id, category, next)}
                         ariaLabel={`${CATEGORY_LABELS[category]} for ${item.commonName}`}
-                        ariaDescribedBy={headroomDescribedBy}
+                        ariaDescribedBy={
+                          categoryBlocked
+                            ? `${headroomDescribedBy} ${untrackedDescribedBy}`
+                            : headroomDescribedBy
+                        }
                         disabled={cap === 0 && ownValue === 0}
                       />
                     );
