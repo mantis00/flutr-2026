@@ -715,5 +715,22 @@ describe("shipment import service", () => {
       const result = shipmentImportCommitRequestSchema.safeParse(legacyBody);
       expect(result.success).toBe(false);
     });
+
+    it("rejects a commit request with no year field at all", () => {
+      const result = shipmentImportCommitRequestSchema.safeParse({
+        raw_text: "irrelevant",
+        preview_hash: `sha256:${"a".repeat(64)}`,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a commit request whose year is not an integer", () => {
+      const result = shipmentImportCommitRequestSchema.safeParse({
+        raw_text: "irrelevant",
+        preview_hash: `sha256:${"a".repeat(64)}`,
+        year: "2025",
+      });
+      expect(result.success).toBe(false);
+    });
   });
 });
