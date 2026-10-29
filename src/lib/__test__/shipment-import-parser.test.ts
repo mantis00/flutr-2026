@@ -1,13 +1,11 @@
 import {
   CANONICAL_HEADER_LABEL_BY_KEY,
-  detectShipmentImportHeaderKey,
   formatShipmentImportIssue,
-  groupShipmentImportRows,
   groupShipmentImportRowsStrict,
   parseExcelDateToIso,
   parseReleasedQuantity,
-  parseShipmentImportRows,
   parseShipmentImportRowsStrict,
+  POSTGRES_INTEGER_MAX,
   splitDelimitedLine,
   validateHeaderRow,
 } from "@/lib/shipment-import-parser";
@@ -69,16 +67,6 @@ function buildStrictRow(overrides: Partial<StrictRowFields> = {}) {
 }
 
 describe("shipment-import-parser", () => {
-  describe("detectShipmentImportHeaderKey", () => {
-    it("maps supported aliases", () => {
-      expect(detectShipmentImportHeaderKey("No. rec")).toBe("numberReceived");
-      expect(detectShipmentImportHeaderKey("Ship date")).toBe("shipDate");
-      expect(detectShipmentImportHeaderKey("No disea")).toBe("diseasedInTransit");
-      expect(detectShipmentImportHeaderKey("No parasit")).toBe("parasite");
-      expect(detectShipmentImportHeaderKey("Poor emerg")).toBe("poorEmergence");
-    });
-  });
-
   describe("splitDelimitedLine", () => {
     it("supports quoted delimiters", () => {
       const cells = splitDelimitedLine('"A, value",B,C', ",");
@@ -102,105 +90,6 @@ describe("shipment-import-parser", () => {
       expect(parseExcelDateToIso("13/99/2025")).toBeNull();
     });
   });
-
-  describe("parseShipmentImportRows", () => {
-    it("returns error for missing required headers", () => {
-      const input = ["Species,Supplier,Ship date", "Caligo atreus,EBN,12/9/25"].join("\n");
-      const result = parseShipmentImportRows(input);
-
-      expect(result.rows).toHaveLength(0);
-      expect(result.rowErrors[0]).toContain("Missing required columns");
-    });
-
-    it("parses rows and normalizes arrival date when needed", () => {
-      const input = [
-        "Species,No. rec,Supplier,Ship date,Arrival date,Emerg. in tr,Damag in tr,No. disea,No. parasit,No emerg,Poor emerg",
-        "Caligo atreus,10,EBN,12/11/25,12/09/25,0,0,0,0,1,0",
-      ].join("\n");
-
-      const result = parseShipmentImportRows(input);
-
-      expect(result.rowErrors).toHaveLength(0);
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0]?.scientificName).toBe("caligo atreus");
-      expect(result.rows[0]?.arrivalDate).toBe(result.rows[0]?.shipmentDate);
-      expect(
-        result.warnings.some((warning) =>
-          warning.includes("Arrival date was before shipment date and was normalized"),
-        ),
-      ).toBe(true);
-    });
-
-    it("preserves imported supplier value case while trimming outer whitespace", () => {
-      const input = [
-        "Species,No. rec,Supplier,Ship date,Arrival date",
-        "Caligo atreus,10, lps historical ,12/11/25,12/11/25",
-      ].join("\n");
-
-      const result = parseShipmentImportRows(input);
-
-      expect(result.rowErrors).toHaveLength(0);
-      expect(result.rows[0]?.supplierCode).toBe("lps historical");
-    });
-
-    it("treats blank No. rec as 0 for legacy compatibility", () => {
-      const input = [
-        "Species,No. rec,Supplier,Ship date,Arrival date,Emerg. in tr,Damag in tr,No. disea,No. parasit,No emerg,Poor emerg",
-        "Caligo atreus,,EBN,12/11/25,12/11/25,0,0,0,0,1,0",
-      ].join("\n");
-
-      const result = parseShipmentImportRows(input);
-
-      expect(result.rowErrors).toHaveLength(0);
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0]?.numberReceived).toBe(0);
-      expect(result.warnings).toContain("Row 2: No. rec was blank and defaulted to 0.");
-    });
-
-    it("warns when metric headers are missing and defaults them to 0", () => {
-      const input = [
-        "Species,No. rec,Supplier,Ship date,Arrival date,No emerg",
-        "Caligo atreus,10,EBN,12/11/25,12/11/25,1",
-      ].join("\n");
-
-      const result = parseShipmentImportRows(input);
-
-      expect(result.rowErrors).toHaveLength(0);
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0]?.emergedInTransit).toBe(0);
-      expect(result.warnings.some((warning) => warning.startsWith("Missing metric columns"))).toBe(
-        true,
-      );
-    });
-  });
-
-  describe("groupShipmentImportRows", () => {
-    it("groups by supplier+dates and aggregates duplicate species rows", () => {
-      const parseResult = parseShipmentImportRows(
-        [
-          "Species,No. rec,Supplier,Ship date,Arrival date,No emerg,No parasit",
-          "Caligo atreus,10,EBN,12/9/25,12/11/25,1,2",
-          "Caligo atreus,5,EBN,12/9/25,12/11/25,3,1",
-        ].join("\n"),
-      );
-
-      expect(parseResult.rowErrors).toHaveLength(0);
-
-      const grouped = groupShipmentImportRows(parseResult.rows);
-      expect(grouped).toHaveLength(1);
-      expect(grouped[0]?.items).toHaveLength(1);
-      expect(grouped[0]?.items[0]?.scientific_name).toBe("caligo atreus");
-      expect(grouped[0]?.items[0]?.number_received).toBe(15);
-      expect(grouped[0]?.items[0]?.non_emergence).toBe(4);
-      expect(grouped[0]?.items[0]?.parasite).toBe(3);
-    });
-  });
-
-  // ===========================================================================================
-  // Strict 13-column contract (Released / good_emergence aware) — new functions only; the
-  // existing functions and tests above are untouched and still describe the old, 12-column,
-  // fuzzy-matching behavior still used by the (not yet updated) service layer.
-  // ===========================================================================================
 
   describe("CANONICAL_HEADER_LABEL_BY_KEY", () => {
     it("agrees with CANONICAL_SHIPMENT_IMPORT_HEADERS (same labels, same order)", () => {
@@ -420,6 +309,123 @@ describe("shipment-import-parser", () => {
       expect(result.issues[0]?.rowNumber).toBe(2);
       expect(result.issues[1]?.rowNumber).toBe(3);
     });
+
+    // -------------------------------------------------------------------------------------------
+    // Integer upper-bound validation (hardening checkpoint, review section 15.2)
+    // -------------------------------------------------------------------------------------------
+
+    it("accepts No. rec at exactly the PostgreSQL integer maximum", () => {
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({ noRec: String(POSTGRES_INTEGER_MAX), disea: "0", released: "" }),
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rowErrors).toHaveLength(0);
+      expect(result.rows[0]?.numberReceived).toBe(POSTGRES_INTEGER_MAX);
+    });
+
+    it("blocks No. rec at the PostgreSQL integer maximum plus one, naming the exact offending row", () => {
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({ noRec: String(POSTGRES_INTEGER_MAX + 1), disea: "0", released: "" }),
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rows).toHaveLength(0);
+      expect(result.issues[0]?.rowNumber).toBe(2);
+      expect(result.issues[0]?.field).toBe("No. rec");
+      expect(result.rowErrors[0]).toContain(
+        `exceeds the maximum allowed value (${POSTGRES_INTEGER_MAX})`,
+      );
+    });
+
+    it("blocks a single oversized loss column even when No. rec itself is in bounds", () => {
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({
+          noRec: String(POSTGRES_INTEGER_MAX),
+          disea: String(POSTGRES_INTEGER_MAX + 1),
+          released: "",
+        }),
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rows).toHaveLength(0);
+      expect(result.issues[0]?.field).toBe("No. disea");
+      expect(result.rowErrors[0]).toContain(
+        `No. disea (${POSTGRES_INTEGER_MAX + 1}) exceeds the maximum allowed value`,
+      );
+    });
+
+    it("accepts Released at exactly the PostgreSQL integer maximum when No. rec matches", () => {
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({
+          noRec: String(POSTGRES_INTEGER_MAX),
+          disea: "0",
+          released: String(POSTGRES_INTEGER_MAX),
+        }),
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rowErrors).toHaveLength(0);
+      expect(result.rows[0]?.goodEmergence).toBe(POSTGRES_INTEGER_MAX);
+    });
+
+    it("blocks Released at the PostgreSQL integer maximum plus one", () => {
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({
+          noRec: String(POSTGRES_INTEGER_MAX),
+          disea: "0",
+          released: String(POSTGRES_INTEGER_MAX + 1),
+        }),
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rows).toHaveLength(0);
+      expect(result.issues[0]?.field).toBe("Released");
+      expect(result.rowErrors[0]).toContain(
+        `exceeds the maximum allowed value (${POSTGRES_INTEGER_MAX})`,
+      );
+    });
+
+    it("still rejects negative and non-numeric values for No. rec and Released after adding the upper bound (no regression)", () => {
+      const negativeNoRec = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "-1", released: "" })].join("\n"),
+      );
+      expect(negativeNoRec.rowErrors[0]).toContain("No. rec must be a non-negative integer");
+
+      const nonNumericNoRec = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "abc", released: "" })].join("\n"),
+      );
+      expect(nonNumericNoRec.rowErrors[0]).toContain("No. rec must be a non-negative integer");
+
+      const negativeReleased = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: "-1" })].join("\n"),
+      );
+      expect(negativeReleased.rowErrors[0]).toContain(
+        "Released must be a non-negative integer or blank",
+      );
+
+      // parseReleasedQuantity (unlike No. rec's parseNonNegativeInteger) explicitly rejects a
+      // fractional value rather than silently truncating it — confirmed pre-existing, unrelated
+      // to this hardening checkpoint; exercised here only to confirm it still holds.
+      const fractionalReleased = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: "1.5" })].join("\n"),
+      );
+      expect(fractionalReleased.rowErrors[0]).toContain(
+        "Released must be a non-negative integer or blank",
+      );
+    });
+
+    it("still parses blank Released as unknown and explicit zero as known zero after adding the upper bound (no regression)", () => {
+      const blank = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: "" })].join("\n"),
+      );
+      expect(blank.rows[0]?.goodEmergence).toBeNull();
+
+      const zero = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: "0" })].join("\n"),
+      );
+      expect(zero.rows[0]?.goodEmergence).toBe(0);
+    });
   });
 
   describe("groupShipmentImportRowsStrict", () => {
@@ -481,6 +487,63 @@ describe("shipment-import-parser", () => {
       expect(grouped.drafts).toHaveLength(1);
       expect(grouped.drafts[0]?.supplier_code).toBe("LPS");
       expect(grouped.issues).toHaveLength(1);
+    });
+
+    // -------------------------------------------------------------------------------------------
+    // Post-grouping aggregate bound check (hardening checkpoint, review section 15.2): two
+    // individually in-bounds rows can still overflow once summed for the same shipment+species key.
+    // -------------------------------------------------------------------------------------------
+
+    it("blocks two individually-valid rows whose grouped No. rec sum exceeds the PostgreSQL integer maximum, naming both rows", () => {
+      const half = Math.floor(POSTGRES_INTEGER_MAX / 2) + 1; // two of these overflow; neither alone does
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({ noRec: String(half), disea: "0", released: "" }),
+        buildStrictRow({ noRec: String(half), disea: "0", released: "" }),
+      ].join("\n");
+      const parsed = parseShipmentImportRowsStrict(input);
+      expect(parsed.rowErrors).toHaveLength(0); // neither individual row is out of bounds
+
+      const grouped = groupShipmentImportRowsStrict(parsed.rows);
+      expect(grouped.drafts).toHaveLength(0); // the whole shipment is excluded
+      expect(grouped.issues).toHaveLength(1);
+      expect(grouped.issues[0]?.field).toBe("No. rec");
+      expect(grouped.issues[0]?.rowNumbers).toEqual([2, 3]); // both contributing rows named
+      expect(grouped.issues[0]?.message).toContain("exceeds the maximum allowed value");
+    });
+
+    it("blocks two individually-valid rows whose grouped Released sum exceeds the PostgreSQL integer maximum", () => {
+      const half = Math.floor(POSTGRES_INTEGER_MAX / 2) + 1;
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({ noRec: String(half), disea: "0", released: String(half) }),
+        buildStrictRow({ noRec: String(half), disea: "0", released: String(half) }),
+      ].join("\n");
+      const parsed = parseShipmentImportRowsStrict(input);
+      expect(parsed.rowErrors).toHaveLength(0);
+
+      const grouped = groupShipmentImportRowsStrict(parsed.rows);
+      expect(grouped.drafts).toHaveLength(0);
+      // Both No. rec and Released overflow for this group — both are reported.
+      const fields = grouped.issues.map((issue) => issue.field);
+      expect(fields).toContain("Released");
+      for (const issue of grouped.issues) {
+        expect(issue.rowNumbers).toEqual([2, 3]);
+      }
+    });
+
+    it("does not block a grouped sum that stays within the PostgreSQL integer maximum", () => {
+      const quarter = Math.floor(POSTGRES_INTEGER_MAX / 4);
+      const input = [
+        VALID_HEADER_ROW,
+        buildStrictRow({ noRec: String(quarter), disea: "0", released: "" }),
+        buildStrictRow({ noRec: String(quarter), disea: "0", released: "" }),
+      ].join("\n");
+      const parsed = parseShipmentImportRowsStrict(input);
+      const grouped = groupShipmentImportRowsStrict(parsed.rows);
+      expect(grouped.issues).toHaveLength(0);
+      expect(grouped.drafts).toHaveLength(1);
+      expect(grouped.drafts[0]?.items[0]?.number_received).toBe(quarter * 2);
     });
   });
 

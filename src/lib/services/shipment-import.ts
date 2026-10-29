@@ -20,7 +20,7 @@ import {
   type ShipmentImportIssue,
   type StrictShipmentImportDraft,
 } from "@/lib/shipment-import-parser";
-import { extractYear } from "@/lib/shipment-import-utils";
+import { CANONICAL_SHIPMENT_IMPORT_HEADERS, extractYear } from "@/lib/shipment-import-utils";
 import { ensureTenantExists, TENANT_ERRORS } from "@/lib/tenant";
 import {
   shipmentImportCommitResponseSchema,
@@ -55,20 +55,12 @@ const SHIPMENT_IMPORT_LOCK_NAMESPACE = "shipment_import";
 
 type ShipmentExportRow = Awaited<ReturnType<typeof listShipmentExportRows>>[number];
 
-const SHIPMENT_EXPORT_HEADERS = [
-  "Species",
-  "Common name",
-  "No. rec",
-  "Supplier",
-  "Ship date",
-  "Arrival date",
-  "Emerg. in transit",
-  "Damag in transit",
-  "No. disea",
-  "No. parasit",
-  "No emerg",
-  "Poor emerg",
-] as const;
+/** The exporter's header row — sourced from the single canonical-header constant (also used by
+ * strict header validation and the blank template) so the two can never drift apart. Hardening
+ * checkpoint: `Released` (the 13th header) was previously missing here entirely — confirmed by
+ * direct code reading in the pre-release review, not assumed — meaning a real export could not be
+ * re-imported by the strict importer, which requires all 13 canonical headers. */
+const SHIPMENT_EXPORT_HEADERS = CANONICAL_SHIPMENT_IMPORT_HEADERS;
 
 function buildUnknownSpeciesPayload(scientificName: string) {
   return {
@@ -126,6 +118,11 @@ function mapRowToExportRecord(row: ShipmentExportRow) {
     row.parasite,
     row.nonEmergence,
     row.poorEmergence,
+    // Never `row.goodEmergence ?? ""` — `??` would turn the one other falsy case that matters
+    // here (numeric `0`) into the SAME blank cell as `null`, destroying the exact NULL-vs-zero
+    // distinction this entire feature exists to preserve. Only `null` (historically unknown)
+    // becomes blank; a known, tracked `0` is written out as the literal number 0.
+    row.goodEmergence === null ? "" : row.goodEmergence,
   ];
 }
 

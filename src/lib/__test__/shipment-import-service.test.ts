@@ -52,6 +52,8 @@ import {
 } from "@/lib/queries/species";
 import { ensureSupplierExistsForGlobalImport, listSuppliersGlobal } from "@/lib/queries/suppliers";
 import { shipmentImportCommitRequestSchema } from "@/lib/validation/shipment-import";
+import { validateHeaderRow } from "@/lib/shipment-import-parser";
+import { CANONICAL_SHIPMENT_IMPORT_HEADERS } from "@/lib/shipment-import-utils";
 
 const mockCreateShipment = createShipment as jest.Mock;
 const mockListShipmentExportRows = listShipmentExportRows as jest.Mock;
@@ -118,25 +120,31 @@ describe("shipment import service", () => {
   });
 
   describe("exportShipmentWorkbookForInstitution", () => {
+    function buildExportRow(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        scientificName: "Caligo atreus",
+        commonName: "Owl butterfly",
+        numberReceived: 10,
+        supplierCode: "EBN",
+        shipmentDate: "2026-09-09",
+        arrivalDate: "2026-09-10",
+        emergedInTransit: 0,
+        damagedInTransit: 0,
+        diseasedInTransit: 0,
+        parasite: 0,
+        nonEmergence: 0,
+        poorEmergence: 0,
+        goodEmergence: 4,
+        ...overrides,
+      };
+    }
+
     it.each([
       ["2026-09-09", "2026-09-10"],
       ["2027-01-01", "2027-01-02"],
     ])("preserves exact exported calendar dates %s -> %s", async (shipmentDate, arrivalDate) => {
       mockListShipmentExportRows.mockResolvedValueOnce([
-        {
-          scientificName: "Caligo atreus",
-          commonName: "Owl butterfly",
-          numberReceived: 10,
-          supplierCode: "EBN",
-          shipmentDate,
-          arrivalDate,
-          emergedInTransit: 0,
-          damagedInTransit: 0,
-          diseasedInTransit: 0,
-          parasite: 0,
-          nonEmergence: 0,
-          poorEmergence: 0,
-        },
+        buildExportRow({ shipmentDate, arrivalDate }),
       ]);
 
       const buffer = await exportShipmentWorkbookForInstitution({ institutionId: 77 });
@@ -146,6 +154,62 @@ describe("shipment import service", () => {
       expect(mockListShipmentExportRows).toHaveBeenCalledWith(77, undefined);
       expect(worksheet.E2).toMatchObject({ t: "s", v: shipmentDate });
       expect(worksheet.F2).toMatchObject({ t: "s", v: arrivalDate });
+    });
+
+    it("produces exactly the 13 canonical headers, in canonical order, with Released as the 13th", async () => {
+      mockListShipmentExportRows.mockResolvedValueOnce([buildExportRow()]);
+
+      const buffer = await exportShipmentWorkbookForInstitution({ institutionId: 77 });
+      const workbook = xlsx.read(buffer, { type: "buffer" });
+      const worksheet = workbook.Sheets.Shipments;
+      const headerRow = xlsx.utils.sheet_to_json<string[]>(worksheet, {
+        header: 1,
+        raw: false,
+        defval: "",
+      })[0];
+
+      expect(headerRow).toEqual(Array.from(CANONICAL_SHIPMENT_IMPORT_HEADERS));
+      expect(headerRow).toHaveLength(13);
+      expect(headerRow[12]).toBe("Released");
+    });
+
+    it("preserves Released NULL as a blank cell, numeric zero as 0, and a positive value unchanged", async () => {
+      mockListShipmentExportRows.mockResolvedValueOnce([
+        buildExportRow({ scientificName: "species unknown released", goodEmergence: null }),
+        buildExportRow({ scientificName: "species known zero", goodEmergence: 0 }),
+        buildExportRow({ scientificName: "species known positive", goodEmergence: 9 }),
+      ]);
+
+      const buffer = await exportShipmentWorkbookForInstitution({ institutionId: 77 });
+      const workbook = xlsx.read(buffer, { type: "buffer" });
+      const worksheet = workbook.Sheets.Shipments;
+
+      // Row 2 = unknown (NULL) Released: the cell must not be written as a numeric value at all.
+      expect(worksheet.M2?.v).not.toBe(0);
+      expect(worksheet.M2?.t).not.toBe("n");
+      // Row 3 = known, explicit zero: must be a real numeric 0, not blank/absent.
+      expect(worksheet.M3).toMatchObject({ t: "n", v: 0 });
+      // Row 4 = known, positive: preserved exactly.
+      expect(worksheet.M4).toMatchObject({ t: "n", v: 9 });
+    });
+
+    it("produces a workbook whose header row round-trips through the strict importer's own header validation with zero issues", async () => {
+      mockListShipmentExportRows.mockResolvedValueOnce([buildExportRow()]);
+
+      const buffer = await exportShipmentWorkbookForInstitution({ institutionId: 77 });
+      // A genuine round-trip: read the produced buffer back with the real `xlsx` library (not an
+      // assertion against the intermediate array-of-arrays this function builds internally), then
+      // feed the resulting header row through the real strict validator.
+      const workbook = xlsx.read(buffer, { type: "buffer" });
+      const worksheet = workbook.Sheets.Shipments;
+      const rows = xlsx.utils.sheet_to_json<string[]>(worksheet, {
+        header: 1,
+        raw: false,
+        defval: "",
+      });
+
+      const { issues } = validateHeaderRow(rows[0]);
+      expect(issues).toEqual([]);
     });
   });
 

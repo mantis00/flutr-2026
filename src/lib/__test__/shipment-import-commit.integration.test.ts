@@ -35,6 +35,14 @@
  * from a previous run that didn't reach its own cleanup (e.g. a killed process), so this suite is
  * safe to re-run without manual database intervention. Nothing here ever touches Reiman Gardens'
  * own rows or any other pre-existing institution/species/supplier.
+ *
+ * Hardening checkpoint update (review section 15.3): the rollback scenario's deterministic
+ * failure mechanism was replaced after the strict parser gained a real upper-bound validation
+ * check (its original mechanism — an oversized `No. rec` — is now rejected during validation
+ * itself, which does not prove real rollback). It now uses a narrowly-scoped, test-only Postgres
+ * trigger/function/guard table (`phase3d_test_*`), installed in `beforeAll` and torn down in
+ * `afterAll`, confined entirely to this file and to `flutr_import_test` — see the
+ * `installPhase3dTestFailureTrigger`/`setPhase3dTestGuard` helpers below for the full design.
  */
 
 import { and, eq, sql } from "drizzle-orm";
@@ -196,6 +204,76 @@ async function supplierExists(code: string): Promise<boolean> {
   return !!row;
 }
 
+// ---------------------------------------------------------------------------
+// Deterministic rollback-failure mechanism (hardening checkpoint, review section 15.3)
+//
+// Replaces the original Phase 3D mechanism (an oversized `No. rec` that overflowed PostgreSQL's
+// `integer` column) — that stopped working once the hardening checkpoint added a real upper-bound
+// *validation* check to the parser: an oversized value is now caught during full-workbook
+// validation (a blocking `issue`, before any transaction opens), which this workstream's own
+// standing rule says is NOT sufficient to prove real rollback.
+//
+// Replacement: a narrowly-scoped, test-only PostgreSQL trigger + function + single-row guard
+// table, installed and torn down entirely within this file, against `flutr_import_test` only.
+// Firing requires BOTH:
+//   1. the sentinel value (`PHASE3D_TEST_SENTINEL_NUMBER_RECEIVED`, an ordinary, bounds-compliant
+//      number that passes every application validation rule, confirmed below by asserting the
+//      full-workbook preview reports zero issues before committing it), AND
+//   2. the guard row (`phase3d_test_guard`) being explicitly enabled — set `true` immediately
+//      before, and reset to `false` immediately after (in a `finally`, so a test failure can't
+//      leave it on), the one call meant to trigger it.
+// A guard TABLE (not a session-local Postgres GUC) is used deliberately: the production commit's
+// own `db.transaction(...)` runs on whichever connection postgres.js's pool happens to hand it,
+// not one this test file controls — a session-scoped `SET`/`SET LOCAL` on a side connection would
+// not reliably be visible to that pooled connection, while a real table row, once committed, is
+// visible to every connection under READ COMMITTED (Postgres's default), regardless of which one
+// the pool selects. This also means the mechanism needs no concurrency/timing coordination at all.
+// ---------------------------------------------------------------------------
+
+const PHASE3D_TEST_SENTINEL_NUMBER_RECEIVED = 123456789;
+
+async function installPhase3dTestFailureTrigger() {
+  // Defensive DROP-IF-EXISTS first (same pattern as the row-cleanup above) so a previous run that
+  // was interrupted before its own teardown ran never leaves a stale trigger/function/table behind.
+  await teardownPhase3dTestFailureTrigger();
+
+  await db.execute(sql`
+    CREATE TABLE phase3d_test_guard (id int PRIMARY KEY, enabled boolean NOT NULL DEFAULT false)
+  `);
+  await db.execute(sql`INSERT INTO phase3d_test_guard (id, enabled) VALUES (1, false)`);
+  // The sentinel is inlined as a raw literal (via `sql.raw`), not a bound `$1` parameter —
+  // postgres.js cannot infer a parameter's type inside a dollar-quoted PL/pgSQL function body
+  // (confirmed: binding it as a normal `sql` template parameter here fails with "could not
+  // determine data type of parameter $1"). Safe here because the value is this file's own fixed,
+  // internal constant, never user input.
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION phase3d_test_fail_on_sentinel() RETURNS trigger AS $$
+    BEGIN
+      IF NEW.number_received = ${sql.raw(String(PHASE3D_TEST_SENTINEL_NUMBER_RECEIVED))}
+         AND (SELECT enabled FROM phase3d_test_guard WHERE id = 1) THEN
+        RAISE EXCEPTION 'phase3d_test: deterministic injected failure (sentinel number_received + guard enabled)';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `);
+  await db.execute(sql`
+    CREATE TRIGGER phase3d_test_trigger
+      BEFORE INSERT ON shipment_items
+      FOR EACH ROW EXECUTE FUNCTION phase3d_test_fail_on_sentinel()
+  `);
+}
+
+async function teardownPhase3dTestFailureTrigger() {
+  await db.execute(sql`DROP TRIGGER IF EXISTS phase3d_test_trigger ON shipment_items`);
+  await db.execute(sql`DROP FUNCTION IF EXISTS phase3d_test_fail_on_sentinel()`);
+  await db.execute(sql`DROP TABLE IF EXISTS phase3d_test_guard`);
+}
+
+async function setPhase3dTestGuard(enabled: boolean) {
+  await db.execute(sql`UPDATE phase3d_test_guard SET enabled = ${enabled} WHERE id = 1`);
+}
+
 /** Non-blocking: holds a real transaction-scoped advisory lock for `institutionId` until
  * `release()` is called, using the exact lock namespace the production code uses. Lets tests
  * deterministically simulate "an import is already running for this institution" without racing
@@ -242,6 +320,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
     }
 
     await cleanupTestData();
+    await installPhase3dTestFailureTrigger();
 
     institutionA = await createTestInstitution("a-success-skip-retry");
     institutionB = await createTestInstitution("b-rollback-preservation-lock");
@@ -261,6 +340,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
 
   afterAll(async () => {
     await cleanupTestData();
+    await teardownPhase3dTestFailureTrigger();
 
     // Close the real connection pool so Jest can exit on its own (see the file-header comment).
     const rawClient = (
@@ -448,53 +528,45 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
 
   describe("Scenarios B & C: rollback within a year, prior-year preservation, retry", () => {
     /**
-     * Deterministic DB-level failure mechanism (documented per this phase's explicit
-     * requirement): the third row's `No. rec` is 9,999,999,999 — an application-VALID,
-     * non-negative integer that satisfies every parser and accounting rule (confirmed below: the
-     * full-workbook preview for this exact raw text reports zero issues) but overflows
-     * PostgreSQL's `integer` (`shipment_items.number_received`) column at INSERT time, inside the
-     * same transaction, after the year's first (valid) shipment has already been inserted. This is
-     * a genuine Postgres error ("value ... is out of range for type integer"), not a pre-validation
-     * rejection — proving the rollback is real, not merely a validation gate.
-     *
-     * This also surfaces a narrow, pre-existing gap: the strict parser (Phase 1) has no upper
-     * bound on `No. rec`/accounting values. Documented here as a finding, not fixed in this phase
-     * — fixing it is Phase 1 parser territory and not required to prove transactional rollback
-     * correctness, so it is left as a follow-up recommendation rather than expanding this phase's
-     * scope.
+     * Deterministic DB-level failure mechanism (hardening checkpoint, review section 15.3 — see
+     * the trigger/guard helpers above for the full design rationale): the third row's `No. rec` is
+     * the sentinel value `123456789` — an entirely ordinary, bounds-compliant integer that
+     * satisfies every parser and accounting rule, including the upper-bound check (confirmed
+     * below: the full-workbook preview for this exact raw text reports zero issues) — but, with
+     * the test-only guard enabled immediately around the one call meant to fail, causes a real
+     * `RAISE EXCEPTION` inside the transaction, after the year's first (valid) shipment has
+     * already been inserted. This proves the rollback is real, not merely a validation gate,
+     * without relying on any value that the parser's own validation would now reject outright.
      */
-    const OVERFLOW_NUMBER_RECEIVED = "9999999999";
+    const SENTINEL_NUMBER_RECEIVED = PHASE3D_TEST_SENTINEL_NUMBER_RECEIVED;
 
-    function buildScenarioRawText(year2011ThirdRowReceived: string) {
-      return buildRawText([
-        // Year 2010 — the "prior year" that must survive a later year's failure.
-        buildRow({
-          species: "Zzz Phase3d Species Rollback A",
-          numberReceived: 5,
-          supplier: "ZZPH3DB1",
-          shipDate: "2010-01-01",
-          arrivalDate: "2010-01-05",
-        }),
-        // Year 2011, shipment 1 — valid, must be inserted (and then rolled back) before shipment 2 fails.
-        buildRow({
-          species: "Zzz Phase3d Species Rollback B",
-          numberReceived: 5,
-          supplier: "ZZPH3DB2",
-          shipDate: "2011-02-01",
-          arrivalDate: "2011-02-05",
-        }),
-        // Year 2011, shipment 2 — the engineered failure (or its fixed value on retry).
-        buildRow({
-          species: "Zzz Phase3d Species Rollback Overflow",
-          numberReceived: year2011ThirdRowReceived,
-          supplier: "ZZPH3DB3",
-          shipDate: "2011-03-01",
-          arrivalDate: "2011-03-05",
-        }),
-      ]);
-    }
-
-    const rawTextFailing = buildScenarioRawText(OVERFLOW_NUMBER_RECEIVED);
+    const rawTextFailing = buildRawText([
+      // Year 2010 — the "prior year" that must survive a later year's failure.
+      buildRow({
+        species: "Zzz Phase3d Species Rollback A",
+        numberReceived: 5,
+        supplier: "ZZPH3DB1",
+        shipDate: "2010-01-01",
+        arrivalDate: "2010-01-05",
+      }),
+      // Year 2011, shipment 1 — valid, must be inserted (and then rolled back) before shipment 2 fails.
+      buildRow({
+        species: "Zzz Phase3d Species Rollback B",
+        numberReceived: 5,
+        supplier: "ZZPH3DB2",
+        shipDate: "2011-02-01",
+        arrivalDate: "2011-02-05",
+      }),
+      // Year 2011, shipment 2 — the engineered-failure shipment (fires only while the guard above
+      // is explicitly enabled; retried unchanged, with the guard off, later in this describe block).
+      buildRow({
+        species: "Zzz Phase3d Species Rollback Overflow",
+        numberReceived: SENTINEL_NUMBER_RECEIVED,
+        supplier: "ZZPH3DB3",
+        shipDate: "2011-03-01",
+        arrivalDate: "2011-03-05",
+      }),
+    ]);
 
     it("the failing raw text passes full-workbook validation cleanly (proves this is not a pre-validation rejection)", async () => {
       const preview = await buildShipmentImportPreviewForInstitution({
@@ -536,6 +608,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
       });
 
       let caught: unknown;
+      await setPhase3dTestGuard(true);
       try {
         await commitShipmentImportForInstitution({
           institutionId: institutionB,
@@ -546,18 +619,22 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         });
       } catch (error) {
         caught = error;
+      } finally {
+        // Reset immediately, in a finally, so a failure in this test itself can never leave the
+        // guard enabled for any later test in this file.
+        await setPhase3dTestGuard(false);
       }
 
       expect(caught).toBeInstanceOf(Error);
       // drizzle-orm wraps the real driver error as `DrizzleQueryError`, whose own `.message` is
-      // just "Failed query: ...\nparams: ..." — the actual Postgres error text ("value ... is out
-      // of range for type integer") lives on `.cause`, not `.message` itself (confirmed directly
+      // just "Failed query: ...\nparams: ..." — the actual Postgres error text (our trigger's own
+      // `RAISE EXCEPTION` message) lives on `.cause`, not `.message` itself (confirmed directly
       // against this project's installed drizzle-orm: `errors.cjs`'s `DrizzleQueryError`
       // constructor attaches the original error as `this.cause`). Check both so this assertion
       // stays correct whether or not a future drizzle-orm version changes that wrapping.
       const causeMessage = (caught as { cause?: { message?: string } }).cause?.message;
       const combinedMessage = `${(caught as Error).message} ${causeMessage ?? ""}`;
-      expect(combinedMessage).toMatch(/out of range/i);
+      expect(combinedMessage).toContain("phase3d_test: deterministic injected failure");
 
       // Neither shipment from year 2011 survives — including the first, VALID one that was
       // genuinely inserted (and rolled back) before the second one's failure.
@@ -609,21 +686,24 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
       await expectLockIsReleased(institutionB);
     });
 
-    it("retrying year 2011 after the failure is fixed succeeds, without disturbing year 2010", async () => {
-      const rawTextFixed = buildScenarioRawText("7");
-
-      const fixedPreview = await buildShipmentImportPreviewForInstitution({
+    it("retrying year 2011 after the engineered failure condition is removed succeeds, without disturbing year 2010", async () => {
+      // Deliberately resubmits the exact same `rawTextFailing` unchanged — the data itself was
+      // never actually invalid (confirmed above: it validates cleanly). Only the test-only guard
+      // made the previous attempt fail, and that guard was reset to `false` in the previous test's
+      // `finally` block. This matches a real transient-failure retry more faithfully than
+      // "fixing" a data value that was never the real problem.
+      const retryPreview = await buildShipmentImportPreviewForInstitution({
         institutionId: institutionB,
-        raw_text: rawTextFixed,
+        raw_text: rawTextFailing,
         source: { kind: "paste" },
         allowSpeciesAutocreateEligible: true,
       });
-      expect(fixedPreview.issues).toEqual([]);
+      expect(retryPreview.issues).toEqual([]);
 
       const result = await commitShipmentImportForInstitution({
         institutionId: institutionB,
-        raw_text: rawTextFixed,
-        preview_hash: fixedPreview.preview_hash,
+        raw_text: rawTextFailing,
+        preview_hash: retryPreview.preview_hash,
         year: 2011,
         options: { allow_species_autocreate: true },
       });
