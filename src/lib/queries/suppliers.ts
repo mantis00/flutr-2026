@@ -1,6 +1,6 @@
 import { and, asc, eq, ne } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db, type DbExecutor } from "@/lib/db";
 import { suppliers } from "@/lib/schema";
 
 import type { CreateSupplierBody, UpdateSupplierBody } from "@/lib/validation/suppliers";
@@ -160,6 +160,12 @@ function isUniqueViolation(error: unknown): boolean {
  *
  * Ensure a global supplier code exists for import commit, creating missing
  * codes as inactive for later platform review.
+ *
+ * Accepts an optional `executor` (a `db.transaction` callback's `tx`) so this can participate
+ * in a caller-owned transaction instead of writing outside it — used by the historical
+ * importer's year-scoped atomic commit (a later phase), so an auto-created supplier never
+ * persists if that transaction later rolls back. Defaults to the plain `db` client, identical
+ * to today's behavior, for every existing caller.
  */
 export async function ensureSupplierExistsForGlobalImport(
   code: string,
@@ -168,10 +174,11 @@ export async function ensureSupplierExistsForGlobalImport(
     country?: string;
     websiteUrl?: string | null;
   },
+  executor: DbExecutor = db,
 ) {
   const supplierCode = code.trim();
 
-  const [globalMatch] = await db
+  const [globalMatch] = await executor
     .select({
       id: suppliers.id,
       code: suppliers.code,
@@ -187,7 +194,7 @@ export async function ensureSupplierExistsForGlobalImport(
     };
   }
 
-  const [created] = await db
+  const [created] = await executor
     .insert(suppliers)
     .values({
       code: supplierCode,
@@ -207,7 +214,7 @@ export async function ensureSupplierExistsForGlobalImport(
   }
 
   // Race: another process inserted first — re-select the winning row.
-  const [existing] = await db
+  const [existing] = await executor
     .select({ id: suppliers.id, code: suppliers.code })
     .from(suppliers)
     .where(eq(suppliers.code, supplierCode))

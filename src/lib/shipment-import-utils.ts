@@ -14,6 +14,27 @@ import type {
 
 export type SourceKind = "xlsx" | "xls" | "csv" | "tsv" | "txt" | "paste";
 
+/**
+ * The 13 canonical historical shipment import/export column headers, in the documented order.
+ * Single source of truth shared by strict header validation, XLSX export, and the blank
+ * template download — keeps all three from drifting apart.
+ */
+export const CANONICAL_SHIPMENT_IMPORT_HEADERS = [
+  "Species",
+  "Common name",
+  "No. rec",
+  "Supplier",
+  "Ship date",
+  "Arrival date",
+  "Emerg. in transit",
+  "Damag in transit",
+  "No. disea",
+  "No. parasit",
+  "No emerg",
+  "Poor emerg",
+  "Released",
+] as const;
+
 export type ShipmentSummaryRow = {
   id: number;
   supplierCode: string;

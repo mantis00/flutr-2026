@@ -4,12 +4,36 @@ jest.mock("@/lib/services/shipment-import", () => ({
   getPlatformShipmentImportPreview: jest.fn(),
   commitPlatformShipmentImport: jest.fn(),
   exportPlatformShipmentWorkbook: jest.fn(),
+  // Mocked alongside the functions above (rather than via jest.requireActual) so this class
+  // reference is identical to the one the route itself imports from this same mocked module,
+  // without pulling in the real module's non-test-friendly dependency chain (e.g. @/auth).
+  ShipmentImportValidationError: class ShipmentImportValidationError extends Error {
+    issues: {
+      rowNumber: number | null;
+      field: string | null;
+      value: string | null;
+      message: string;
+    }[];
+    constructor(
+      issues: {
+        rowNumber: number | null;
+        field: string | null;
+        value: string | null;
+        message: string;
+      }[],
+    ) {
+      super("VALIDATION_FAILED");
+      this.name = "ShipmentImportValidationError";
+      this.issues = issues;
+    }
+  },
 }));
 
 import {
   getPlatformShipmentImportPreview,
   commitPlatformShipmentImport,
   exportPlatformShipmentWorkbook,
+  ShipmentImportValidationError,
 } from "@/lib/services/shipment-import";
 import { POST as previewImport } from "@/app/api/platform/institutions/[id]/shipments/import/preview/route";
 import { POST as commitImport } from "@/app/api/platform/institutions/[id]/shipments/import/commit/route";
@@ -60,26 +84,10 @@ function validPreviewBody() {
 
 function validCommitBody() {
   return {
+    raw_text:
+      "Species,Common name,No. rec,Supplier,Ship date,Arrival date,Emerg. in transit,Damag in transit,No. disea,No. parasit,No emerg,Poor emerg,Released\nCaligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
     preview_hash: `sha256:${"a".repeat(64)}`,
-    shipments: [
-      {
-        supplier_code: "EBN",
-        shipment_date: "2025-12-09T12:00:00.000Z",
-        arrival_date: "2025-12-11T12:00:00.000Z",
-        items: [
-          {
-            scientific_name: "caligo atreus",
-            number_received: 10,
-            emerged_in_transit: 0,
-            damaged_in_transit: 0,
-            diseased_in_transit: 0,
-            parasite: 0,
-            non_emergence: 0,
-            poor_emergence: 0,
-          },
-        ],
-      },
-    ],
+    year: 2025,
   };
 }
 
@@ -130,7 +138,9 @@ describe("Platform Shipment Import API", () => {
         warnings: [],
         unknown_species: [],
         unknown_suppliers: [],
-        shipments: [],
+        issues: [],
+        existing_shipments: [],
+        years: [2025],
         preview_hash: `sha256:${"b".repeat(64)}`,
       });
 
@@ -166,12 +176,73 @@ describe("Platform Shipment Import API", () => {
       expect((await response.json()).error.code).toBe("INVALID_REQUEST");
     });
 
+    it("returns 400 with structured issue details for a blocking workbook validation error", async () => {
+      mockCommitPlatformShipmentImport.mockRejectedValueOnce(
+        new ShipmentImportValidationError([
+          {
+            rowNumber: 2,
+            field: "Released",
+            value: "-1",
+            message: "Released must be a non-negative integer or blank.",
+          },
+        ]),
+      );
+
+      const response = (await commitImport(
+        makeCommitRequest(validCommitBody()),
+        routeContext("1"),
+      ))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.code).toBe("INVALID_REQUEST");
+      expect(body.error.details).toContainEqual({
+        path: "Released",
+        message: "Released must be a non-negative integer or blank.",
+      });
+    });
+
+    it("returns 400 when the requested year is not found in the validated workbook", async () => {
+      mockCommitPlatformShipmentImport.mockRejectedValueOnce(new Error("YEAR_NOT_FOUND"));
+
+      const response = (await commitImport(
+        makeCommitRequest(validCommitBody()),
+        routeContext("1"),
+      ))!;
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+    });
+
+    it("returns 409 when another import is already running for this institution", async () => {
+      mockCommitPlatformShipmentImport.mockRejectedValueOnce(new Error("IMPORT_ALREADY_RUNNING"));
+
+      const response = (await commitImport(
+        makeCommitRequest(validCommitBody()),
+        routeContext("1"),
+      ))!;
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe("CONFLICT");
+    });
+
+    it("returns 400 for a legacy { shipments } commit body", async () => {
+      const response = (await commitImport(
+        makeCommitRequest({
+          preview_hash: `sha256:${"a".repeat(64)}`,
+          shipments: [],
+          options: {},
+        }),
+        routeContext("1"),
+      ))!;
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+      expect(mockCommitPlatformShipmentImport).not.toHaveBeenCalled();
+    });
+
     it("returns 200 for valid commit", async () => {
       mockCommitPlatformShipmentImport.mockResolvedValueOnce({
+        year: 2025,
         created: 1,
-        failed: 0,
         skipped: 0,
-        failures: [],
         warnings: [],
       });
 
@@ -181,7 +252,7 @@ describe("Platform Shipment Import API", () => {
       ))!;
       expect(response.status).toBe(200);
       expect(mockCommitPlatformShipmentImport).toHaveBeenCalledWith(
-        expect.objectContaining({ institutionId: 1 }),
+        expect.objectContaining({ institutionId: 1, year: 2025 }),
       );
     });
   });

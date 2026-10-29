@@ -157,43 +157,18 @@ export function useShipmentImport({
       setErrorMessage("Run parse preview before importing.");
       return;
     }
-    setIsImporting(true);
-    setErrorMessage(null);
-    setCommitSummary(null);
-    try {
-      const response = await fetch(commitUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...tenantHeaders },
-        body: JSON.stringify({
-          preview_hash: preview.preview_hash,
-          shipments: preview.shipments,
-          options: {
-            allow_species_autocreate: allowSpeciesAutocreate,
-            allow_duplicate_headers: allowDuplicateHeaders,
-          },
-        }),
-      });
-      if (!response.ok) {
-        const errorBody = (await response.json().catch(() => null)) as ApiError | null;
-        setErrorMessage(errorBody?.error?.message ?? "Unable to commit import.");
-        return;
-      }
-      const data = (await response.json()) as CommitResponse;
-      setPreview(null);
-      setCommitSummary(data);
-      if (data.failed === 0) {
-        toast.success("Shipments imported successfully.");
-      } else {
-        toast.warning(
-          `Import completed with ${data.failed.toLocaleString()} failed shipment${data.failed !== 1 ? "s" : ""}.`,
-        );
-      }
-      onImportSuccess();
-    } catch {
-      setErrorMessage("Unable to commit import.");
-    } finally {
-      setIsImporting(false);
-    }
+    // Temporary, Phase 3C measure: the commit endpoint now requires a year-scoped request
+    // (`{ raw_text, preview_hash, year, options }`) and a year-by-year progress UI, neither of
+    // which this hook implements yet — that is Phase 5's work. Rather than send a payload the
+    // new endpoint would reject anyway (or guess at a `year`), stop here with a clear, honest
+    // message and make no network call at all, so this cannot produce any unintended write.
+    // Remove this early return once Phase 5 replaces this function with the real year-by-year
+    // commit loop (`commitUrl`, `allowSpeciesAutocreate`, `allowDuplicateHeaders`, and
+    // `onImportSuccess` below remain for that rewrite to use).
+    setErrorMessage(
+      "Commit is temporarily unavailable while historical import is upgraded to commit one year " +
+        "at a time. This will return in an upcoming update.",
+    );
   }
 
   async function handleExportData() {
@@ -239,11 +214,10 @@ export function useShipmentImport({
   // Derived values
   // -------------------------------------------------------------------------
 
-  const canCommit =
-    !!preview &&
-    preview.row_errors.length === 0 &&
-    preview.shipments.length > 0 &&
-    (allowSpeciesAutocreate || preview.unknown_species.length === 0);
+  // Always `false` for now — see the temporary `handleCommitImport` note above. Once Phase 5
+  // rewrites this hook around the year-scoped commit loop, this should be restored to a real
+  // gate (e.g. `preview.row_errors.length === 0 && preview.years.length > 0 && ...`).
+  const canCommit = false;
 
   const exportRangeError =
     exportFrom && exportTo && exportFrom > exportTo ? REVERSED_RANGE_ERROR : null;

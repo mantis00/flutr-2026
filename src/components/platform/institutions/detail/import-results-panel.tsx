@@ -81,13 +81,13 @@ export default function ImportResultsPanel({
         </div>
       )}
 
-      {/* Commit result panel */}
+      {/* Commit result panel — year-scoped since Phase 3C; a single commit response now
+          describes exactly one Arrival year, never a whole-workbook partial-failure summary. */}
       {commitSummary && (
         <div className="space-y-2 rounded-md border p-4">
-          <p className="text-sm font-medium">Import Summary</p>
-          <div className="grid gap-2 text-sm md:grid-cols-3">
+          <p className="text-sm font-medium">Import Summary — Year {commitSummary.year}</p>
+          <div className="grid gap-2 text-sm md:grid-cols-2">
             <p>Created: {commitSummary.created}</p>
-            <p>Failed: {commitSummary.failed}</p>
             <p>Skipped: {commitSummary.skipped}</p>
           </div>
 
@@ -102,20 +102,10 @@ export default function ImportResultsPanel({
             </div>
           )}
 
-          {commitSummary.failures.length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-destructive text-sm font-medium">Import Failures</p>
-              <ul className="text-destructive list-disc space-y-1 pl-5 text-xs">
-                {commitSummary.failures.slice(0, 20).map((failure, index) => (
-                  <li key={`commit-failure-${index}-${failure}`}>{failure}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-sm text-emerald-700" role="status" aria-live="polite">
-              Import completed without shipment failures.
-            </p>
-          )}
+          <p className="text-sm text-emerald-700" role="status" aria-live="polite">
+            Year {commitSummary.year} committed successfully. A failed commit returns an error
+            instead of a summary here — nothing partial is ever shown.
+          </p>
 
           <Button type="button" variant="outline" size="sm" onClick={onReset}>
             Import another file

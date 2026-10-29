@@ -24,6 +24,7 @@ import {
   deleteShipment,
   listShipmentExportRows,
   SHIPMENT_ERRORS,
+  shipmentHeaderExists,
   updateShipment,
 } from "@/lib/queries/shipments";
 import { ensureSpeciesLinksForInstitution } from "@/lib/queries/species";
@@ -359,6 +360,168 @@ describe("shipment queries", () => {
 
     expect(tx.select).toHaveBeenCalledTimes(1);
     expect(headerUpdateSet).toHaveBeenCalledWith({ supplier_code: "SUP-2" });
+  });
+
+  describe("createShipment: good_emergence and transaction-executor support", () => {
+    function buildItem(overrides: Record<string, unknown> = {}) {
+      return {
+        butterfly_species_id: 4,
+        number_received: 12,
+        emerged_in_transit: 0,
+        damaged_in_transit: 0,
+        diseased_in_transit: 0,
+        parasite: 0,
+        non_emergence: 0,
+        poor_emergence: 0,
+        ...overrides,
+      };
+    }
+
+    it("defaults good_emergence to 0 when the field is omitted (manual-create compatibility)", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem()],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ good_emergence: 0 }),
+      ]);
+    });
+
+    it("writes an explicit null unchanged, never coalesced to 0", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem({ good_emergence: null })],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ good_emergence: null }),
+      ]);
+    });
+
+    it("writes an explicit numeric zero as a known zero, not defaulted", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem({ good_emergence: 0 })],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ good_emergence: 0 }),
+      ]);
+    });
+
+    it("writes a positive known value unchanged", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem({ good_emergence: 9 })],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ good_emergence: 9 }),
+      ]);
+    });
+
+    it("uses a supplied executor directly and does not open a nested transaction", async () => {
+      const insertStub = buildInsertStub();
+
+      const shipmentId = await createShipment(
+        77,
+        {
+          supplier_code: "SUP-1",
+          shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+          arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+          items: [buildItem({ good_emergence: null })],
+        },
+        { insert: insertStub.insert } as unknown as Parameters<typeof createShipment>[2],
+      );
+
+      expect(shipmentId).toBe(101);
+      expect(mockTransaction).not.toHaveBeenCalled();
+      expect(mockEnsureSpeciesLinksForInstitution).toHaveBeenCalledWith(
+        77,
+        [4],
+        expect.objectContaining({ insert: insertStub.insert }),
+      );
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ good_emergence: null }),
+      ]);
+    });
+
+    it("still opens its own transaction when no executor is supplied", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem()],
+      });
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("shipmentHeaderExists", () => {
+    it("uses the plain db client by default", async () => {
+      mockSelect.mockReturnValueOnce(createThenableQuery([{ id: 1 }]));
+
+      const exists = await shipmentHeaderExists(
+        77,
+        "LPS",
+        new Date("2026-06-10T00:00:00.000Z"),
+        new Date("2026-06-11T00:00:00.000Z"),
+      );
+
+      expect(exists).toBe(true);
+      expect(mockSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses a supplied executor instead of the plain db client", async () => {
+      const txSelect = jest.fn(() => createThenableQuery([]));
+
+      const exists = await shipmentHeaderExists(
+        77,
+        "LPS",
+        new Date("2026-06-10T00:00:00.000Z"),
+        new Date("2026-06-11T00:00:00.000Z"),
+        { select: txSelect } as unknown as Parameters<typeof shipmentHeaderExists>[4],
+      );
+
+      expect(exists).toBe(false);
+      expect(txSelect).toHaveBeenCalledTimes(1);
+      expect(mockSelect).not.toHaveBeenCalled();
+    });
   });
 
   it("does not delete anything when the shipment is not in the tenant", async () => {

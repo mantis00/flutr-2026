@@ -66,5 +66,35 @@ describe("supplier queries", () => {
         wasGloballyMissing: true,
       });
     });
+
+    it("uses the plain db client by default", async () => {
+      mockLimit.mockResolvedValueOnce([{ id: 42, code: "LPS" }]);
+
+      await ensureSupplierExistsForGlobalImport("LPS");
+
+      expect(mockSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses a supplied executor for every read and write instead of the plain db client", async () => {
+      const txLimit = jest.fn().mockResolvedValueOnce([]);
+      const txWhere = jest.fn(() => ({ limit: txLimit }));
+      const txFrom = jest.fn(() => ({ where: txWhere }));
+      const txSelect = jest.fn(() => ({ from: txFrom }));
+      const txReturning = jest.fn().mockResolvedValueOnce([{ id: 99, code: "GC" }]);
+      const txOnConflictDoNothing = jest.fn(() => ({ returning: txReturning }));
+      const txValues = jest.fn(() => ({ onConflictDoNothing: txOnConflictDoNothing }));
+      const txInsert = jest.fn(() => ({ values: txValues }));
+
+      const supplier = await ensureSupplierExistsForGlobalImport("GC", undefined, {
+        select: txSelect,
+        insert: txInsert,
+      } as unknown as Parameters<typeof ensureSupplierExistsForGlobalImport>[2]);
+
+      expect(supplier).toEqual({ id: 99, code: "GC", wasGloballyMissing: true });
+      expect(txSelect).toHaveBeenCalledTimes(1);
+      expect(txInsert).toHaveBeenCalledTimes(1);
+      expect(mockSelect).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
   });
 });
