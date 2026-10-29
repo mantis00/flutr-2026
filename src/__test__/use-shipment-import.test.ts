@@ -9,6 +9,7 @@ import {
   buildInitialYearProgress,
   buildYearCommitRequestBody,
   canStartYearCommit,
+  computeImportProgressSummary,
   createCommitRunGuard,
   markPendingAsNotAttempted,
   runYearByYearCommit,
@@ -130,6 +131,51 @@ describe("sumYearProgressTotals", () => {
       { year: 2026, status: "not_attempted", created: 0, skipped: 0 },
     ];
     expect(sumYearProgressTotals(progress)).toEqual({ created: 10, skipped: 2 });
+  });
+});
+
+describe("computeImportProgressSummary", () => {
+  it("computes percent, completed count, and allCompleted for a fully successful run", () => {
+    const progress: YearProgress[] = [
+      { year: 2024, status: "completed", created: 1, skipped: 0 },
+      { year: 2025, status: "completed", created: 0, skipped: 3 }, // an all-skipped year
+    ];
+    expect(computeImportProgressSummary(progress)).toEqual({
+      total: 2,
+      completedCount: 2,
+      failedEntry: null,
+      percent: 100,
+      allCompleted: true,
+    });
+  });
+
+  it("identifies the failed entry and reports allCompleted: false when a year failed", () => {
+    const progress: YearProgress[] = [
+      { year: 2002, status: "completed", created: 1, skipped: 0 },
+      { year: 2010, status: "failed", created: 0, skipped: 0, error: "boom" },
+      { year: 2020, status: "not_attempted", created: 0, skipped: 0 },
+    ];
+    const summary = computeImportProgressSummary(progress);
+    expect(summary.failedEntry).toEqual({
+      year: 2010,
+      status: "failed",
+      created: 0,
+      skipped: 0,
+      error: "boom",
+    });
+    expect(summary.completedCount).toBe(1);
+    expect(summary.percent).toBe(33);
+    expect(summary.allCompleted).toBe(false);
+  });
+
+  it("reports 0 percent and allCompleted: false for an empty/not-yet-started progress array", () => {
+    expect(computeImportProgressSummary([])).toEqual({
+      total: 0,
+      completedCount: 0,
+      failedEntry: null,
+      percent: 0,
+      allCompleted: false,
+    });
   });
 });
 

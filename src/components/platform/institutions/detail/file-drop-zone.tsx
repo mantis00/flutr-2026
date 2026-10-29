@@ -25,6 +25,9 @@ export type FileDropZoneProps = {
   onPasteModeChange: (value: boolean) => void;
   /** Called when the paste textarea changes. Parent handles all related state resets. */
   onRawTextChange: (text: string) => void;
+  /** True while a commit run is active — the workbook cannot change mid-run (Phase 5A already
+   * no-ops the underlying handlers defensively; this disables the controls visibly too). */
+  disabled?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -39,11 +42,13 @@ export default function FileDropZone({
   isPasteMode,
   onPasteModeChange,
   onRawTextChange,
+  disabled = false,
 }: FileDropZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleFileSelection(file: File) {
+    if (disabled) return;
     await onFile(file);
   }
 
@@ -52,15 +57,18 @@ export default function FileDropZone({
       <div
         className={cn(
           "flex flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition-colors",
+          disabled && "pointer-events-none opacity-60",
           isDragOver ? "border-primary bg-primary/5" : "border-border hover:border-border/80",
         )}
         onDragOver={(e) => {
+          if (disabled) return;
           e.preventDefault();
           setIsDragOver(true);
         }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={async (e) => {
           e.preventDefault();
+          if (disabled) return;
           setIsDragOver(false);
           const file = e.dataTransfer.files[0];
           if (file) await handleFileSelection(file);
@@ -88,7 +96,7 @@ export default function FileDropZone({
           type="button"
           variant="outline"
           size="sm"
-          disabled={isReadingFile}
+          disabled={isReadingFile || disabled}
           onClick={() => fileInputRef.current?.click()}
         >
           Select Excel File
@@ -99,6 +107,7 @@ export default function FileDropZone({
           accept=".xlsx,.xls,.csv,.tsv,.txt"
           className="sr-only"
           aria-label="Upload file"
+          disabled={disabled}
           onChange={(e) => {
             const file = e.target.files?.[0];
             e.currentTarget.value = "";
@@ -107,7 +116,8 @@ export default function FileDropZone({
         />
         <button
           type="button"
-          className="text-muted-foreground mt-3 text-xs underline-offset-2 hover:underline"
+          className="text-muted-foreground mt-3 text-xs underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled}
           onClick={() => onPasteModeChange(true)}
         >
           or paste text instead
@@ -124,7 +134,8 @@ export default function FileDropZone({
         </Label>
         <button
           type="button"
-          className="text-muted-foreground text-xs underline-offset-2 hover:underline"
+          className="text-muted-foreground text-xs underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled}
           onClick={() => onPasteModeChange(false)}
         >
           upload file instead
@@ -136,6 +147,7 @@ export default function FileDropZone({
         onChange={(e) => onRawTextChange(e.target.value)}
         className="min-h-48 font-mono text-xs"
         placeholder="Paste copied rows from legacy Excel export here…"
+        disabled={disabled}
       />
     </div>
   );

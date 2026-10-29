@@ -90,6 +90,24 @@ export function sumYearProgressTotals(progress: YearProgress[]): {
   );
 }
 
+/** Pure presentation-derived summary of a `YearProgress[]`, shared by the progress panel so its
+ * overall-percentage/failed-year/all-completed logic is unit-testable without rendering anything. */
+export function computeImportProgressSummary(progress: YearProgress[]): {
+  total: number;
+  completedCount: number;
+  failedEntry: YearProgress | null;
+  percent: number;
+  allCompleted: boolean;
+} {
+  const total = progress.length;
+  const completedCount = progress.filter((item) => item.status === "completed").length;
+  const failedEntry = progress.find((item) => item.status === "failed") ?? null;
+  const percent = total > 0 ? Math.round((completedCount / total) * 100) : 0;
+  // `total > 0` guards against vacuous truth for an empty/not-yet-started array.
+  const allCompleted = total > 0 && completedCount === total && !failedEntry;
+  return { total, completedCount, failedEntry, percent, allCompleted };
+}
+
 export function buildYearCommitRequestBody(
   rawText: string,
   previewHash: string,
