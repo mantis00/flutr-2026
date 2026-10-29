@@ -37,6 +37,8 @@ export const ROUTES = {
       `/${slug}/shipments/${id}/release/${releaseId}/edit`,
     butterflies: (slug: string) => `/${slug}/butterflies`,
     news: (slug: string) => `/${slug}/news`,
+    guides: (slug: string) => `/${slug}/guides`,
+    guideBySlug: (slug: string, guide: string) => `/${slug}/guides/${guide}`,
     speciesApi: "/api/tenant/species",
     speciesOverrideApi: (id: number | string) => `/api/tenant/species/${id}`,
     newsApi: "/api/tenant/news",
