@@ -253,6 +253,39 @@ export function createCommitRunGuard() {
   };
 }
 
+/**
+ * A tiny, React-free guard against a stale async response overwriting newer state. First added
+ * for preview responses (manual QA finding: an in-flight "Parse preview" request can resolve
+ * after the workbook, source, or `allow_species_autocreate` toggle has already changed — or
+ * after a second "Parse preview" has already started — and would otherwise repopulate
+ * `preview`/`errorMessage` with a result that no longer corresponds to the current intent), and
+ * reused with its own separate instance for file-read responses (a dropped/selected file's read
+ * can resolve after a newer file was selected, text was pasted, or the form was reset — the same
+ * shape of problem, a different async operation). Unlike `createCommitRunGuard`, there is no
+ * "active" concept to refuse a second start with: a new request is always allowed to start
+ * (overlapping requests are not forbidden, only superseded), so `next()` always succeeds and
+ * simply bumps the generation. `bump()` invalidates any in-flight request without starting a new
+ * one — called by every action that changes what the in-flight request's result would mean — so
+ * a response for an old generation is recognized as stale via `isCurrent` and discarded instead
+ * of applied.
+ */
+export function createLatestRequestGuard() {
+  let generation = 0;
+
+  return {
+    next(): number {
+      generation += 1;
+      return generation;
+    },
+    bump() {
+      generation += 1;
+    },
+    isCurrent(id: number): boolean {
+      return id === generation;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The hook
 // ---------------------------------------------------------------------------
@@ -289,7 +322,7 @@ export function useShipmentImport({
   const [rawText, setRawText] = useState("");
   const [sourceKind, setSourceKind] = useState<SourceKind>("paste");
   const [sourceFileName, setSourceFileName] = useState<string | undefined>(undefined);
-  const [isPasteMode, setIsPasteMode] = useState(false);
+  const [isPasteMode, setIsPasteModeState] = useState(false);
   const [isReadingFile, setIsReadingFile] = useState(false);
 
   // Preview / commit state
@@ -311,6 +344,11 @@ export function useShipmentImport({
 
   // Duplicate-run / stale-response guard (Phase 5A) — see `createCommitRunGuard` above.
   const runGuardRef = useRef(createCommitRunGuard());
+  // Stale-preview-response guard — see `createLatestRequestGuard` above.
+  const previewGuardRef = useRef(createLatestRequestGuard());
+  // Stale-file-read-response guard — a separate instance of the same guard, tracking a
+  // different async operation (reading a dropped/selected file) than `previewGuardRef` does.
+  const fileReadGuardRef = useRef(createLatestRequestGuard());
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -318,6 +356,19 @@ export function useShipmentImport({
 
   async function processFile(file: File) {
     if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
+    // Invalidates any in-flight preview; its eventual response is now stale and will be
+    // discarded by `handleParsePreview`'s own `isCurrent` checks. `setIsParsing(false)` reflects
+    // that fact immediately here too — otherwise, with no other preview started afterward, the
+    // stale request's own (correctly skipped) `finally` would never clear it, leaving the
+    // parsing indicator stuck on indefinitely.
+    previewGuardRef.current.bump();
+    setIsParsing(false);
+    // Starting a new file read invalidates any older one the same way: `next()` makes this read
+    // the current generation, so an older, still-in-flight read's eventual completion — success
+    // or failure — is recognized as stale below and discarded instead of applied. This is what
+    // actually closes the race (overlapping reads are allowed to proceed; only the latest one's
+    // result is ever used), not a disabled drop zone.
+    const requestId = fileReadGuardRef.current.next();
     const detected = detectSourceKind(file.name);
     setSourceKind(detected);
     setSourceFileName(file.name);
@@ -325,22 +376,49 @@ export function useShipmentImport({
     setCommitSummary(null);
     setYearProgress(null);
     setErrorMessage(null);
-    setIsPasteMode(false);
+    // The raw setter, not the `setIsPasteMode` wrapper below — that wrapper itself bumps
+    // `fileReadGuardRef`, which would immediately invalidate the `requestId` captured just above
+    // for this very read.
+    setIsPasteModeState(false);
     setIsReadingFile(true);
     try {
       const text = await readUploadFileAsText(file, detected);
-      setRawText(text);
+      // Guarded: a stale successful read must never set `rawText` out from under a newer
+      // selection/paste/reset — this is what would otherwise pair a newer file's displayed name
+      // with an older file's content.
+      if (fileReadGuardRef.current.isCurrent(requestId)) {
+        setRawText(text);
+      }
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error && error.message ? error.message : "Unable to read file contents.",
-      );
+      if (fileReadGuardRef.current.isCurrent(requestId)) {
+        setErrorMessage(
+          error instanceof Error && error.message ? error.message : "Unable to read file contents.",
+        );
+      }
     } finally {
-      setIsReadingFile(false);
+      // Only the current generation may clear `isReadingFile` — if this read was superseded by a
+      // newer one, that newer read owns the indicator and will clear it itself when it finishes;
+      // clearing it here would show "not reading" while the real, current read is still in
+      // flight.
+      if (fileReadGuardRef.current.isCurrent(requestId)) {
+        setIsReadingFile(false);
+      }
     }
   }
 
   function handlePasteChange(text: string) {
     if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
+    // See the comment in `processFile` above — bumping invalidates an in-flight preview, and
+    // `setIsParsing(false)` must accompany it or the indicator can be left stuck on.
+    previewGuardRef.current.bump();
+    setIsParsing(false);
+    // Switching to pasted text invalidates any in-flight file read the same way: without this,
+    // a slow read that started before the user switched to typing/pasting could still resolve
+    // afterward and silently overwrite what they just typed. `setIsReadingFile(false)` closes
+    // the same "left stuck on" gap as above — nothing else would clear it otherwise, since the
+    // invalidated read's own `finally` now correctly skips doing so.
+    fileReadGuardRef.current.bump();
+    setIsReadingFile(false);
     setRawText(text);
     setSourceKind("paste");
     setSourceFileName(undefined);
@@ -352,6 +430,11 @@ export function useShipmentImport({
 
   function handleReset() {
     if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
+    // See the comments in `processFile`/`handlePasteChange` above.
+    previewGuardRef.current.bump();
+    setIsParsing(false);
+    fileReadGuardRef.current.bump();
+    setIsReadingFile(false);
     setRawText("");
     setSourceKind("paste");
     setSourceFileName(undefined);
@@ -359,12 +442,39 @@ export function useShipmentImport({
     setCommitSummary(null);
     setYearProgress(null);
     setErrorMessage(null);
-    setIsPasteMode(false);
+    // The raw setter — this function already bumped `fileReadGuardRef` explicitly above.
+    setIsPasteModeState(false);
+  }
+
+  /** Wraps the raw `isPasteMode` setter so switching to the paste textarea (even before typing
+   * anything) also invalidates an in-flight file read — otherwise a slow read could still resolve
+   * afterward and populate the now-visible paste textarea with the old file's content, since both
+   * views are bound to the same `rawText` state. */
+  function setIsPasteMode(value: boolean) {
+    fileReadGuardRef.current.bump();
+    setIsReadingFile(false);
+    setIsPasteModeState(value);
   }
 
   function setAllowSpeciesAutocreate(value: boolean) {
     if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
     setAllowSpeciesAutocreateState(value);
+    // Manual QA finding 1 fix: this toggle changes what preview itself will report (an
+    // unresolved species blocks when it's off, is informational when it's on) — a preview
+    // validated under the old value must not be treated as still valid for a commit that will
+    // use the new one. Invalidating forces a fresh "Parse preview" against the new intent, the
+    // same way changing the raw text or source already does. `bump()` additionally covers the
+    // in-flight case: a preview request already sent under the old value must not be allowed to
+    // resolve and silently repopulate `preview` after the toggle has since changed (the
+    // in-flight-preview race found during manual QA follow-up). `setIsParsing(false)` closes a
+    // further gap in that same fix: without it, an invalidated in-flight request's own `finally`
+    // correctly skips clearing the indicator (it's no longer current), but nothing else ever
+    // clears it either if no further preview is started — leaving it stuck on indefinitely.
+    previewGuardRef.current.bump();
+    setIsParsing(false);
+    setPreview(null);
+    setCommitSummary(null);
+    setYearProgress(null);
   }
 
   function setAllowDuplicateHeaders(value: boolean) {
@@ -382,6 +492,12 @@ export function useShipmentImport({
       setErrorMessage("Paste data or upload a file before parsing.");
       return;
     }
+    // `next()` always succeeds (overlapping preview requests aren't forbidden, only superseded —
+    // unlike the commit guard's `tryStart`, there is no "already active" refusal here) and makes
+    // this the current generation, so a still-in-flight earlier request's response — and this
+    // request's own response, once a newer action bumps or supersedes it — can be recognized as
+    // stale below and discarded instead of applied.
+    const requestId = previewGuardRef.current.next();
     setIsParsing(true);
     setPreview(null);
     setCommitSummary(null);
@@ -394,19 +510,40 @@ export function useShipmentImport({
         body: JSON.stringify({
           raw_text: rawText,
           source: { kind: sourceKind, file_name: sourceFileName },
+          // Manual QA finding 1 fix: preview's own species-blocking decision now follows this
+          // request's actual intent, not a static role-eligibility flag — so it must be sent at
+          // preview time too, not only at commit (line ~450 below).
+          allow_species_autocreate: allowSpeciesAutocreate,
         }),
       });
       if (!response.ok) {
         const errorBody = (await response.json().catch(() => null)) as ApiError | null;
-        setErrorMessage(errorBody?.error?.message ?? "Unable to parse preview.");
+        // Guarded: a stale failed response must never display an outdated error over whatever
+        // state a newer action (a settings change, a new workbook, or a newer preview) has since
+        // established.
+        if (previewGuardRef.current.isCurrent(requestId)) {
+          setErrorMessage(errorBody?.error?.message ?? "Unable to parse preview.");
+        }
         return;
       }
       const data = (await response.json()) as PreviewResponse;
-      setPreview(data);
+      // Guarded: a stale successful response must never restore a preview that was deliberately
+      // cleared (or replaced by a newer, still-pending request) after this request was sent.
+      if (previewGuardRef.current.isCurrent(requestId)) {
+        setPreview(data);
+      }
     } catch {
-      setErrorMessage("Unable to parse preview.");
+      if (previewGuardRef.current.isCurrent(requestId)) {
+        setErrorMessage("Unable to parse preview.");
+      }
     } finally {
-      setIsParsing(false);
+      // Only the current generation may clear `isParsing` — if this request was superseded by a
+      // newer, still-running preview, that newer call owns `isParsing` and will clear it itself
+      // when it finishes; clearing it here would show "not parsing" while the real, current
+      // request is still in flight.
+      if (previewGuardRef.current.isCurrent(requestId)) {
+        setIsParsing(false);
+      }
     }
   }
 

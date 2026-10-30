@@ -153,6 +153,70 @@ describe("Platform Shipment Import API", () => {
         expect.objectContaining({ institutionId: 1 }),
       );
     });
+
+    it("accepts a request omitting allow_species_autocreate (backward-compatible)", async () => {
+      mockGetPlatformShipmentImportPreview.mockResolvedValueOnce({
+        summary: {
+          total_rows: 1,
+          shipments_detected: 1,
+          row_errors: 0,
+          warnings: 0,
+          unknown_species: 0,
+          unknown_suppliers: 0,
+        },
+        row_errors: [],
+        warnings: [],
+        unknown_species: [],
+        unknown_suppliers: [],
+        issues: [],
+        existing_shipments: [],
+        years: [2025],
+        preview_hash: `sha256:${"b".repeat(64)}`,
+      });
+
+      const response = (await previewImport(
+        makePreviewRequest(validPreviewBody()),
+        routeContext("1"),
+      ))!;
+      expect(response.status).toBe(200);
+      // The route passes the body through as-is (the field is simply absent, not present with an
+      // explicit `undefined`); the service itself defaults the omitted field to `false` (manual
+      // QA finding 1 fix) — not asserted again here since it's covered directly against the real
+      // service in `shipment-import-service.test.ts`.
+      const callArgs = mockGetPlatformShipmentImportPreview.mock.calls[0][0];
+      expect(callArgs.institutionId).toBe(1);
+      expect("allow_species_autocreate" in callArgs).toBe(false);
+    });
+
+    it("forwards an explicit allow_species_autocreate: true to the service", async () => {
+      mockGetPlatformShipmentImportPreview.mockResolvedValueOnce({
+        summary: {
+          total_rows: 1,
+          shipments_detected: 1,
+          row_errors: 0,
+          warnings: 0,
+          unknown_species: 0,
+          unknown_suppliers: 0,
+        },
+        row_errors: [],
+        warnings: [],
+        unknown_species: [],
+        unknown_suppliers: [],
+        issues: [],
+        existing_shipments: [],
+        years: [2025],
+        preview_hash: `sha256:${"b".repeat(64)}`,
+      });
+
+      const response = (await previewImport(
+        makePreviewRequest({ ...validPreviewBody(), allow_species_autocreate: true }),
+        routeContext("1"),
+      ))!;
+      expect(response.status).toBe(200);
+      expect(mockGetPlatformShipmentImportPreview).toHaveBeenCalledWith(
+        expect.objectContaining({ institutionId: 1, allow_species_autocreate: true }),
+      );
+    });
   });
 
   describe("POST /api/platform/institutions/[id]/shipments/import/commit", () => {

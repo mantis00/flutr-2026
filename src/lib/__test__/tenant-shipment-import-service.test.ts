@@ -68,7 +68,7 @@ describe("tenant shipment import service", () => {
       expect(mockBuildPreview).not.toHaveBeenCalled();
     });
 
-    it("resolves the tenant and forwards allowSpeciesAutocreateEligible: false, never true", async () => {
+    it("resolves the tenant and forwards allowSpeciesAutocreate: false, never true", async () => {
       mockSession("ADMIN");
       mockResolveTenantBySlug.mockResolvedValueOnce(7);
       mockBuildPreview.mockResolvedValueOnce({ issues: [] });
@@ -87,7 +87,27 @@ describe("tenant shipment import service", () => {
         institutionId: 7,
         raw_text: "raw workbook text",
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: false,
+        allowSpeciesAutocreate: false,
+      });
+    });
+
+    it("forces allowSpeciesAutocreate: false even when the request body itself asks for true (manual QA finding 1: tenant restriction must survive the new real-toggle preview path)", async () => {
+      mockSession("ADMIN");
+      mockResolveTenantBySlug.mockResolvedValueOnce(7);
+      mockBuildPreview.mockResolvedValueOnce({ issues: [] });
+
+      await getTenantShipmentImportPreview({
+        slug: "demo",
+        raw_text: "raw workbook text",
+        source: { kind: "paste" },
+        allow_species_autocreate: true,
+      });
+
+      expect(mockBuildPreview).toHaveBeenCalledWith({
+        institutionId: 7,
+        raw_text: "raw workbook text",
+        source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
     });
   });

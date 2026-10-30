@@ -5,6 +5,19 @@ jest.mock("@/auth", () => ({
   auth: jest.fn(),
 }));
 
+const mockRequireUser = jest.fn();
+const mockCanCrossTenant = jest.fn();
+jest.mock("@/lib/authz", () => ({
+  requireUser: (session: unknown) => mockRequireUser(session),
+  canCrossTenant: (user: unknown) => mockCanCrossTenant(user),
+}));
+
+const mockEnsureTenantExists = jest.fn();
+jest.mock("@/lib/tenant", () => ({
+  ensureTenantExists: (institutionId: number) => mockEnsureTenantExists(institutionId),
+  TENANT_ERRORS: { INSTITUTION_NOT_FOUND: "Institution not found" },
+}));
+
 jest.mock("@/lib/queries/shipments", () => ({
   createShipment: jest.fn(),
   listShipmentExportRows: jest.fn(),
@@ -38,6 +51,7 @@ import {
   buildShipmentImportPreviewForInstitution,
   commitShipmentImportForInstitution,
   exportShipmentWorkbookForInstitution,
+  getPlatformShipmentImportPreview,
   ShipmentImportValidationError,
 } from "@/lib/services/shipment-import";
 import {
@@ -117,6 +131,14 @@ describe("shipment import service", () => {
     jest.resetAllMocks();
     mockDbTransaction.mockImplementation(async (callback) => callback(FAKE_TX));
     mockTxExecute.mockResolvedValue([{ acquired: true }]);
+    // Authorization passthrough for `getPlatformShipmentImportPreview`'s tests below — these
+    // tests exercise the real platform wrapper, not a mock of it, so its `assertPlatformImportAccess`
+    // call needs a non-throwing auth/tenant chain. Unused by every other describe block in this
+    // file (which call `buildShipmentImportPreviewForInstitution`/`commitShipmentImportForInstitution`
+    // directly, bypassing this wrapper entirely).
+    mockRequireUser.mockReturnValue({ id: 1, role: "SUPERUSER" });
+    mockCanCrossTenant.mockReturnValue(true);
+    mockEnsureTenantExists.mockResolvedValue(undefined);
   });
 
   describe("exportShipmentWorkbookForInstitution", () => {
@@ -229,6 +251,7 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.row_errors).toEqual([]);
@@ -250,6 +273,7 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10, ebn legacy ,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.row_errors).toEqual([]);
@@ -266,6 +290,7 @@ describe("shipment import service", () => {
         institutionId: 1,
         raw_text: ["Species,Supplier,Ship date", "Caligo atreus,EBN,12/9/25"].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.summary.shipments_detected).toBe(0);
@@ -277,7 +302,7 @@ describe("shipment import service", () => {
       ).toBe(true);
     });
 
-    it("blocks an unresolved species for a tenant-eligible request (cannot legally auto-create)", async () => {
+    it("blocks an unresolved species when allowSpeciesAutocreate is false, naming its real row number (manual QA finding 1 + 2)", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
       mockShipmentHeaderExists.mockResolvedValue(false);
@@ -289,16 +314,19 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: false,
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.unknown_species).toEqual(["caligo atreus"]);
       expect(
         preview.row_errors.some((e) => e.includes("cannot be auto-created for this request")),
       ).toBe(true);
+      const speciesIssue = preview.issues.find((issue) => issue.field === "Species");
+      expect(speciesIssue?.rowNumbers).toEqual([2]);
+      expect(preview.row_errors.some((e) => e.startsWith("Rows 2:"))).toBe(true);
     });
 
-    it("does not block an unresolved species for a platform-eligible request", async () => {
+    it("does not block an unresolved species when allowSpeciesAutocreate is true", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
       mockShipmentHeaderExists.mockResolvedValue(false);
@@ -310,11 +338,31 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       expect(preview.unknown_species).toEqual(["caligo atreus"]);
       expect(preview.row_errors).toEqual([]);
+    });
+
+    it("lists every contributing row number for a species unresolved across multiple rows/years (manual QA finding 2)", async () => {
+      mockListSpeciesGlobal.mockResolvedValueOnce([]);
+      mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
+      mockShipmentHeaderExists.mockResolvedValue(false);
+
+      const preview = await buildShipmentImportPreviewForInstitution({
+        institutionId: 1,
+        raw_text: [
+          STRICT_HEADER_ROW,
+          "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
+          "Caligo atreus,Owl Butterfly,5,EBN,1/5/24,1/6/24,0,0,0,0,0,0,5",
+        ].join("\n"),
+        source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
+      });
+
+      const speciesIssue = preview.issues.find((issue) => issue.field === "Species");
+      expect(speciesIssue?.rowNumbers).toEqual([2, 3]);
     });
 
     it("reports an existing shipment as a non-blocking notice, not a validation error", async () => {
@@ -329,6 +377,7 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.row_errors).toEqual([]);
@@ -348,6 +397,7 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,5,EBN,1/5/24,1/6/24,0,0,0,0,0,0,5",
         ].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.years).toEqual([2024, 2025]);
@@ -365,6 +415,7 @@ describe("shipment import service", () => {
           "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
         ].join("\n"),
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(mockCreateShipment).not.toHaveBeenCalled();
@@ -383,6 +434,7 @@ describe("shipment import service", () => {
         institutionId: 1,
         raw_text: rawText,
         source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
       });
 
       expect(preview.preview_hash).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -390,6 +442,68 @@ describe("shipment import service", () => {
       // A different raw_text (even a trivial whitespace change) must produce a different hash —
       // the hash genuinely binds to the exact text, not just the institution id.
       expect(preview.preview_hash).not.toBe(buildPreviewHash(1, rawText + "\n"));
+    });
+  });
+
+  describe("getPlatformShipmentImportPreview (manual QA finding 1: real toggle value, not role eligibility)", () => {
+    it("defaults to blocking an unresolved species when allow_species_autocreate is omitted from the request — matching commit's own default", async () => {
+      mockListSpeciesGlobal.mockResolvedValueOnce([]);
+      mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
+      mockShipmentHeaderExists.mockResolvedValue(false);
+
+      const preview = await getPlatformShipmentImportPreview({
+        institutionId: 1,
+        raw_text: [
+          STRICT_HEADER_ROW,
+          "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
+        ].join("\n"),
+        source: { kind: "paste" },
+      });
+
+      expect(preview.unknown_species).toEqual(["caligo atreus"]);
+      expect(
+        preview.row_errors.some((e) => e.includes("cannot be auto-created for this request")),
+      ).toBe(true);
+    });
+
+    it("does not block an unresolved species when the request explicitly sets allow_species_autocreate: true", async () => {
+      mockListSpeciesGlobal.mockResolvedValueOnce([]);
+      mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
+      mockShipmentHeaderExists.mockResolvedValue(false);
+
+      const preview = await getPlatformShipmentImportPreview({
+        institutionId: 1,
+        raw_text: [
+          STRICT_HEADER_ROW,
+          "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
+        ].join("\n"),
+        source: { kind: "paste" },
+        allow_species_autocreate: true,
+      });
+
+      expect(preview.unknown_species).toEqual(["caligo atreus"]);
+      expect(preview.row_errors).toEqual([]);
+    });
+
+    it("blocks an unresolved species when the request explicitly sets allow_species_autocreate: false — reproduces the manual QA 2004 scenario", async () => {
+      mockListSpeciesGlobal.mockResolvedValueOnce([]);
+      mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
+      mockShipmentHeaderExists.mockResolvedValue(false);
+
+      const preview = await getPlatformShipmentImportPreview({
+        institutionId: 1,
+        raw_text: [
+          STRICT_HEADER_ROW,
+          "Caligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
+        ].join("\n"),
+        source: { kind: "paste" },
+        allow_species_autocreate: false,
+      });
+
+      expect(preview.unknown_species).toEqual(["caligo atreus"]);
+      expect(
+        preview.row_errors.some((e) => e.includes("cannot be auto-created for this request")),
+      ).toBe(true);
     });
   });
 

@@ -29,12 +29,13 @@ export async function getTenantShipmentImportPreview(
   // A tenant request can never legally auto-create a species (see commitTenantShipmentImport
   // below, which force-disables `allow_species_autocreate` server-side regardless of the
   // request body) — so an unresolved species is promoted to a blocking preview issue here,
-  // unlike the platform preview path.
+  // unconditionally, ignoring whatever the request body may have sent for this option (a tenant
+  // client never sends it today, but this must hold even if one did).
   return buildShipmentImportPreviewForInstitution({
     institutionId: tenantId,
     raw_text,
     source,
-    allowSpeciesAutocreateEligible: false,
+    allowSpeciesAutocreate: false,
   });
 }
 

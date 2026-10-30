@@ -260,10 +260,14 @@ describeIntegration("shipment import — Phase 6 real end-to-end verification", 
       ]);
 
       // Commit the original workbook into the source institution via the real platform routes.
+      // Two of the three species are unresolved and will be auto-created below — preview must be
+      // told the same `allow_species_autocreate: true` intent, or it now blocks (manual QA
+      // finding 1 fix: preview follows the real per-request toggle, not role eligibility).
       const previewResponse = await platformPreview(
         makePlatformRequest(`/api/platform/institutions/${source.id}/shipments/import/preview`, {
           raw_text: originalRawText,
           source: { kind: "paste" },
+          allow_species_autocreate: true,
         }),
         routeContext(source.id),
       );
@@ -412,6 +416,10 @@ describeIntegration("shipment import — Phase 6 real end-to-end verification", 
           {
             raw_text: rawText,
             source: { kind: "paste" },
+            // Every generated species here is intentionally unresolved; this test is about
+            // request-size handling, not species resolution, so opt into auto-create so the huge
+            // payload's own validity isn't gated on an unrelated option (manual QA finding 1 fix).
+            allow_species_autocreate: true,
           },
         ),
         routeContext(institution.id),
@@ -451,13 +459,18 @@ describeIntegration("shipment import — Phase 6 real end-to-end verification", 
           {
             raw_text: rawText,
             source: { kind: "paste" },
+            // Manual QA finding 1 fix: preview's blocking decision now follows the actual,
+            // per-request toggle value, not a static role-eligibility flag — so a platform
+            // request intending to auto-create must say so at preview time too, matching what
+            // it will request at commit below.
+            allow_species_autocreate: true,
           },
         ),
         routeContext(institution.id),
       );
       const preview = await previewResponse!.json();
       expect(previewResponse!.status).toBe(200);
-      // Platform preview never blocks on an unresolved species (it can legally auto-create).
+      // With allow_species_autocreate: true, an unresolved species stays informational only.
       expect(preview.issues).toEqual([]);
 
       const commitResponse = await platformCommit(

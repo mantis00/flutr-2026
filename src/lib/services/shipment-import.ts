@@ -18,6 +18,7 @@ import {
   normalizeSupplierCode,
   parseShipmentImportRowsStrict,
   type ShipmentImportIssue,
+  type StrictParsedShipmentImportRow,
   type StrictShipmentImportDraft,
 } from "@/lib/shipment-import-parser";
 import { CANONICAL_SHIPMENT_IMPORT_HEADERS, extractYear } from "@/lib/shipment-import-utils";
@@ -77,6 +78,48 @@ function formatShipmentLabel(shipment: StrictShipmentImportDraft) {
   const shipmentDate = shipment.shipment_date.slice(0, 10);
   const arrivalDate = shipment.arrival_date.slice(0, 10);
   return `${shipment.supplier_code} (${shipmentDate} -> ${arrivalDate})`;
+}
+
+/**
+ * One pass over every parsed row, building a species -> contributing-row-numbers lookup —
+ * reused for every unresolved species in one request instead of re-scanning all rows once per
+ * unknown species (manual QA finding 2). Shared by both preview and commit, which otherwise
+ * build near-identical unresolved-species issues independently.
+ */
+function buildRowNumbersBySpecies(rows: StrictParsedShipmentImportRow[]): Map<string, number[]> {
+  const rowNumbersBySpecies = new Map<string, number[]>();
+  for (const row of rows) {
+    const rowNumbers = rowNumbersBySpecies.get(row.scientificName);
+    if (rowNumbers) {
+      rowNumbers.push(row.rowNumber);
+    } else {
+      rowNumbersBySpecies.set(row.scientificName, [row.rowNumber]);
+    }
+  }
+  return rowNumbersBySpecies;
+}
+
+/**
+ * Builds the blocking "unresolved species" issues shared by preview and commit — a species not
+ * in the catalog, and not legally auto-creatable for this request, blocks every year (review
+ * section 11a). `rowNumbers` names every original row the species appears in (manual QA finding
+ * 2), looked up from the shared `rowNumbersBySpecies` map rather than re-scanning `parsed.rows`
+ * per species.
+ */
+function buildUnresolvedSpeciesIssues(
+  unknownSpecies: string[],
+  rowNumbersBySpecies: Map<string, number[]>,
+  allowSpeciesAutocreate: boolean,
+): ShipmentImportIssue[] {
+  if (allowSpeciesAutocreate) return [];
+
+  return unknownSpecies.map((scientificName) => ({
+    rowNumber: null,
+    rowNumbers: rowNumbersBySpecies.get(scientificName) ?? [],
+    field: "Species",
+    value: scientificName,
+    message: `Species "${scientificName}" is not in the catalog and cannot be auto-created for this request.`,
+  }));
 }
 
 /**
@@ -145,34 +188,39 @@ export async function getPlatformShipmentImportPreview({
   institutionId,
   raw_text,
   source,
+  allow_species_autocreate,
 }: ShipmentImportPreviewRequest & {
   institutionId: number;
 }): Promise<ShipmentImportPreviewResponse> {
   await assertPlatformImportAccess(institutionId);
-  // Platform (SUPERUSER) requests can legally opt into species auto-create at commit time
-  // (`allow_species_autocreate`), so an unresolved species stays an informational notice here,
-  // unchanged from today — only a tenant request (which can never legally auto-create) promotes
-  // it to a blocking issue. See `buildShipmentImportPreviewForInstitution`'s
-  // `allowSpeciesAutocreateEligible` parameter.
+  // Manual QA finding 1 fix: a platform (SUPERUSER) request's unresolved-species blocking
+  // decision must follow the *actual* `allow_species_autocreate` intent for this request, not a
+  // static "this role is permitted to use auto-create" eligibility flag — the latter let preview
+  // report zero errors for a workbook that a same-toggle-state commit would then correctly
+  // reject, since commit always decides this from the real submitted option
+  // (`commitShipmentImportForInstitution`'s `allowSpeciesAutocreate`, derived from
+  // `options?.allow_species_autocreate ?? false`). Omitting the field defaults to `false` here
+  // too, so a preview and a commit that both omit it always agree.
   return buildShipmentImportPreviewForInstitution({
     institutionId,
     raw_text,
     source,
-    allowSpeciesAutocreateEligible: true,
+    allowSpeciesAutocreate: allow_species_autocreate ?? false,
   });
 }
 
 export async function buildShipmentImportPreviewForInstitution({
   institutionId,
   raw_text,
-  allowSpeciesAutocreateEligible = false,
+  allowSpeciesAutocreate,
 }: ShipmentImportPreviewRequest & {
   institutionId: number;
-  /** `false` (default) for a tenant request, which can never legally auto-create a species —
-   * every unresolved species becomes a blocking issue. `true` for a platform/SUPERUSER request,
-   * which can legally opt into auto-create at commit time — unresolved species stay an
-   * informational notice only, unchanged from today's behavior. */
-  allowSpeciesAutocreateEligible?: boolean;
+  /** The actual, per-request intent — never a role-eligibility proxy (manual QA finding 1). A
+   * tenant request force-passes `false` unconditionally (it can never legally auto-create a
+   * species); a platform request passes through its own submitted `allow_species_autocreate`
+   * (defaulted to `false` when omitted). `false` promotes every unresolved species to a blocking
+   * issue; `true` leaves it an informational notice only (`unknown_species`). */
+  allowSpeciesAutocreate: boolean;
 }): Promise<ShipmentImportPreviewResponse> {
   const parsed = parseShipmentImportRowsStrict(raw_text);
   const grouped = groupShipmentImportRowsStrict(parsed.rows);
@@ -203,20 +251,17 @@ export async function buildShipmentImportPreviewForInstitution({
     ),
   ).sort();
 
-  // Reclassification (review section 11a): a tenant request can never legally auto-create a
-  // species, so every unresolved name is promoted from an informational notice into the same
+  // Reclassification (review section 11a): when auto-create won't actually be used for this
+  // request, every unresolved name is promoted from an informational notice into the same
   // blocking `issues`/`row_errors` collection as every other validation problem — surfaced
-  // during full-workbook validation, not discovered for the first time at commit. Platform
-  // requests keep today's behavior (informational only; the existing `allowSpeciesAutocreate ||
-  // unknown_species.length === 0` client gate is unaffected either way).
-  const speciesIssues: ShipmentImportIssue[] = allowSpeciesAutocreateEligible
-    ? []
-    : unknownSpecies.map((scientificName) => ({
-        rowNumber: null,
-        field: "Species",
-        value: scientificName,
-        message: `Species "${scientificName}" is not in the catalog and cannot be auto-created for this request.`,
-      }));
+  // during full-workbook validation, not discovered for the first time at commit. `rowNumbers`
+  // names every original row the species appears in (manual QA finding 2).
+  const rowNumbersBySpecies = buildRowNumbersBySpecies(parsed.rows);
+  const speciesIssues = buildUnresolvedSpeciesIssues(
+    unknownSpecies,
+    rowNumbersBySpecies,
+    allowSpeciesAutocreate,
+  );
 
   const issues: ShipmentImportIssue[] = [...parsed.issues, ...grouped.issues, ...speciesIssues];
   const rowErrors = issues.map(formatShipmentImportIssue);
@@ -331,19 +376,18 @@ export async function commitShipmentImportForInstitution({
     ),
   );
 
-  // Same reclassification rule as preview (review section 11a), but driven by the actual
-  // requested `options.allow_species_autocreate` rather than a permission-eligibility flag —
-  // the tenant wrapper (`commitTenantShipmentImport`) force-overrides this to `false` before
-  // reaching here, exactly as it already did before this phase, so a tenant request can never
-  // legally bypass this check regardless of what its own request body asked for.
-  const speciesIssues: ShipmentImportIssue[] = allowSpeciesAutocreate
-    ? []
-    : unknownSpecies.map((scientificName) => ({
-        rowNumber: null,
-        field: "Species",
-        value: scientificName,
-        message: `Species "${scientificName}" is not in the catalog and cannot be auto-created for this request.`,
-      }));
+  // Same reclassification rule as preview (review section 11a), driven by the actual requested
+  // `options.allow_species_autocreate` — the tenant wrapper (`commitTenantShipmentImport`)
+  // force-overrides this to `false` before reaching here, exactly as it already did before this
+  // phase, so a tenant request can never legally bypass this check regardless of what its own
+  // request body asked for. `rowNumbers` names every original row the species appears in (manual
+  // QA finding 2), via the same shared lookup preview uses.
+  const rowNumbersBySpecies = buildRowNumbersBySpecies(parsed.rows);
+  const speciesIssues = buildUnresolvedSpeciesIssues(
+    unknownSpecies,
+    rowNumbersBySpecies,
+    allowSpeciesAutocreate,
+  );
 
   // No shipment in ANY year commits while any blocking issue exists anywhere in the workbook —
   // the governing whole-workbook invariant (review section 14.2's final paragraph).

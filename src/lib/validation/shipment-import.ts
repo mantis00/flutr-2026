@@ -11,6 +11,12 @@ export const shipmentImportPreviewRequestSchema = z
   .object({
     raw_text: z.string().min(1).max(2_000_000),
     source: importSourceSchema,
+    /** The caller's actual intent for this validation pass — not a role-eligibility flag. Omitted
+     * (or a tenant request, which force-disables this server-side regardless of what's sent)
+     * defaults to `false`, matching commit's own conservative default
+     * (`options?.allow_species_autocreate ?? false`), so a preview with this field omitted never
+     * disagrees with a commit that also omits it. */
+    allow_species_autocreate: z.boolean().optional(),
   })
   .strict();
 

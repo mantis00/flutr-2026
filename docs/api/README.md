@@ -370,15 +370,25 @@ coalesced (`??`) with a missing/omitted value, which would silently turn "unknow
 zero." Export reverses this exactly: `NULL` → blank cell, any numeric value (including `0`) → the
 literal number.
 
-**Validation (`POST .../import/preview`)**: request `{ raw_text, source }`; no database writes.
-Validates the complete workbook — every row, every duplicate-species group, every quantity bound —
-and returns structured `issues` (each `{ rowNumber, rowNumbers?, field, value, message }`), the
-derived flat `row_errors` strings, non-blocking `existing_shipments` (shipments already on record,
-which commit will skip by default) and `unknown_suppliers` notices, the sorted distinct Arrival
-`years` found, and a `preview_hash` (SHA-256 over `raw_text` + institution id). An unresolved
-species that cannot legally be auto-created is a **blocking** issue for a tenant request (tenants
-can never auto-create species) but only an informational notice for a platform request (which can
-opt into auto-create at commit time).
+**Validation (`POST .../import/preview`)**: request `{ raw_text, source, allow_species_autocreate?
+}`; no database writes. `allow_species_autocreate` is optional and omitting it defaults to
+`false` — the same conservative default commit itself applies when its own `options.
+allow_species_autocreate` is omitted, so a preview and a commit that both omit it always agree on
+whether an unresolved species blocks. Validates the complete workbook — every row, every
+duplicate-species group, every quantity bound — and returns structured `issues` (each
+`{ rowNumber, rowNumbers?, field, value, message }`), the derived flat `row_errors` strings,
+non-blocking `existing_shipments` (shipments already on record, which commit will skip by default)
+and `unknown_suppliers` notices, the sorted distinct Arrival `years` found, and a `preview_hash`
+(SHA-256 over `raw_text` + institution id). An unresolved species that cannot legally be
+auto-created is a **blocking** issue; a tenant request always treats it as blocking regardless of
+the submitted option (tenants can never legally auto-create a species, enforced server-side even
+if a tenant request body sends `allow_species_autocreate: true`), while a platform/SUPERUSER
+request's unresolved species blocks when `allow_species_autocreate` is `false` (or omitted) and is
+only an informational notice (`unknown_species`) when it is `true`. Commit independently
+re-derives and re-validates this same decision from its own request's `options.
+allow_species_autocreate` — never from anything a prior preview call concluded — so a preview
+result only predicts what an _immediately following_ commit with the same option value will do,
+not what commit will do if that value, the raw text, or the catalog changes in between.
 
 **Commit (`POST .../import/commit`)**: request `{ raw_text, preview_hash, year, options? }` —
 `options: { allow_species_autocreate?, allow_duplicate_headers? }`. There is no `shipments` field;

@@ -11,6 +11,7 @@ import {
   canStartYearCommit,
   computeImportProgressSummary,
   createCommitRunGuard,
+  createLatestRequestGuard,
   markPendingAsNotAttempted,
   runYearByYearCommit,
   sumYearProgressTotals,
@@ -414,5 +415,59 @@ describe("createCommitRunGuard", () => {
     expect(result.stoppedEarly).toBe(true);
     // 2020 is never even attempted once the run is invalidated after 2010's response lands.
     expect(runCommit).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createLatestRequestGuard", () => {
+  it("next() returns a new, increasing id every call", () => {
+    const guard = createLatestRequestGuard();
+    const first = guard.next();
+    const second = guard.next();
+    const third = guard.next();
+
+    expect(second).toBeGreaterThan(first);
+    expect(third).toBeGreaterThan(second);
+  });
+
+  it("the latest request remains current until something invalidates it", () => {
+    const guard = createLatestRequestGuard();
+    const requestId = guard.next();
+
+    expect(guard.isCurrent(requestId)).toBe(true);
+  });
+
+  it("bump() invalidates an in-flight request without starting a new one (a settings change mid-request)", () => {
+    const guard = createLatestRequestGuard();
+    const requestId = guard.next();
+    expect(guard.isCurrent(requestId)).toBe(true);
+
+    guard.bump(); // e.g. the "Auto-create species" toggle changed while this request was pending
+    expect(guard.isCurrent(requestId)).toBe(false);
+  });
+
+  it("bump() invalidates an in-flight request the same way for a workbook/source change", () => {
+    const guard = createLatestRequestGuard();
+    const requestId = guard.next();
+
+    guard.bump(); // e.g. new raw text was pasted, or the workbook was reset, mid-request
+    expect(guard.isCurrent(requestId)).toBe(false);
+  });
+
+  it("an older request is no longer current once a newer request starts (starting another preview invalidates the earlier one)", () => {
+    const guard = createLatestRequestGuard();
+    const older = guard.next();
+    const newer = guard.next();
+
+    expect(guard.isCurrent(older)).toBe(false);
+    expect(guard.isCurrent(newer)).toBe(true);
+  });
+
+  it("repeated bump() calls with no next() leave every previously-issued id stale", () => {
+    const guard = createLatestRequestGuard();
+    const requestId = guard.next();
+
+    guard.bump();
+    guard.bump();
+    expect(guard.isCurrent(requestId)).toBe(false);
   });
 });

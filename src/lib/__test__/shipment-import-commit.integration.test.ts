@@ -398,7 +398,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionA,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       expect(preview.issues).toEqual([]);
@@ -410,7 +410,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionA,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       const result = await commitShipmentImportForInstitution({
@@ -481,7 +481,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionA,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       const result = await commitShipmentImportForInstitution({
@@ -503,7 +503,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionA,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       const result = await commitShipmentImportForInstitution({
@@ -573,7 +573,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawTextFailing,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
       expect(preview.issues).toEqual([]);
       expect(preview.years).toEqual([2010, 2011]);
@@ -584,7 +584,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawTextFailing,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       const result = await commitShipmentImportForInstitution({
@@ -604,7 +604,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawTextFailing,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       let caught: unknown;
@@ -696,7 +696,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawTextFailing,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
       expect(retryPreview.issues).toEqual([]);
 
@@ -751,7 +751,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       let caught: unknown;
@@ -792,7 +792,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionC,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
       expect(preview.issues).toEqual([]);
 
@@ -826,7 +826,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
         institutionId: institutionB,
         raw_text: rawText,
         source: { kind: "paste" },
-        allowSpeciesAutocreateEligible: true,
+        allowSpeciesAutocreate: true,
       });
 
       // Shipment already exists from the earlier scenario — a successful, idempotent skip proves
