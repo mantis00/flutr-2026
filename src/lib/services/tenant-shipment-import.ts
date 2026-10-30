@@ -26,10 +26,16 @@ export async function getTenantShipmentImportPreview(
   const tenantId = await resolveTenantBySlug(user, data.slug);
   const { raw_text, source } = data;
 
+  // A tenant request can never legally auto-create a species (see commitTenantShipmentImport
+  // below, which force-disables `allow_species_autocreate` server-side regardless of the
+  // request body) — so an unresolved species is promoted to a blocking preview issue here,
+  // unconditionally, ignoring whatever the request body may have sent for this option (a tenant
+  // client never sends it today, but this must hold even if one did).
   return buildShipmentImportPreviewForInstitution({
     institutionId: tenantId,
     raw_text,
     source,
+    allowSpeciesAutocreate: false,
   });
 }
 
@@ -40,12 +46,13 @@ export async function commitTenantShipmentImport(
   if (!canManageInstitutionProfile(user)) throw new Error("FORBIDDEN");
 
   const tenantId = await resolveTenantBySlug(user, data.slug);
-  const { preview_hash, shipments, options } = data;
+  const { raw_text, preview_hash, year, options } = data;
 
   return commitShipmentImportForInstitution({
     institutionId: tenantId,
+    raw_text,
     preview_hash,
-    shipments,
+    year,
     options: {
       ...options,
       // Tenant admins cannot create global species records.

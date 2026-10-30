@@ -119,6 +119,9 @@ All tenant routes use `x-tenant-slug` for tenant context:
 - `GET /api/tenant/shipments/[id]/releases` — list release events for a shipment
 - `GET/POST /api/tenant/news` — list and create institution news entries
 - `PATCH/DELETE /api/tenant/news/[id]` — update or delete a news entry
+- `POST /api/tenant/shipments/import/preview` — validate a historical workbook, no writes
+- `POST /api/tenant/shipments/import/commit` — commit one Arrival year of a validated workbook
+- `GET /api/tenant/shipments/export` — export the institution's shipment data as `.xlsx`
 
 #### Platform routes
 
@@ -128,6 +131,9 @@ All tenant routes use `x-tenant-slug` for tenant context:
 - `GET/PATCH/DELETE /api/platform/species/[id]` — species detail, update, delete
 - `GET/POST /api/platform/suppliers` — list & create global suppliers
 - `GET/PATCH/DELETE /api/platform/suppliers/[id]` — global supplier detail, update, delete
+- `POST /api/platform/institutions/[id]/shipments/import/preview` — validate a historical workbook for any institution, no writes
+- `POST /api/platform/institutions/[id]/shipments/import/commit` — commit one Arrival year of a validated workbook for any institution
+- `GET /api/platform/institutions/[id]/shipments/export` — export any institution's shipment data as `.xlsx`
 
 ### Platform species create/update contract
 
@@ -320,11 +326,14 @@ Returns `404 NOT_FOUND` if the shipment does not exist in the resolved instituti
 
 Release mutation note: current operational `shipment_items.good_emergence` values
 are numeric and new rows default to `0`. The nullable column reserves `NULL` for
-historical rows whose Released total was not tracked; future historical-import work
-will introduce that state explicitly. `NULL` is distinct from tracked `0`, and
-release-quantity mutations reject a row if its `good_emergence` is `NULL`. Current
-historical import/export endpoints do not yet implement aggregate Released/unknown
-mapping; that work is deferred.
+historical rows whose Released total was not tracked. `NULL` is distinct from
+tracked `0`, and release-quantity mutations reject a row if its `good_emergence`
+is `NULL`. The historical import/export endpoints below (`/shipments/import/*`,
+`/shipments/export`) implement this NULL-vs-zero mapping explicitly: a blank
+`Released` cell imports as `NULL`; a numeric cell (including `0`) imports as that
+exact tracked value; export reverses the mapping exactly (`NULL` → blank cell,
+`0`/positive → the literal number). See "Historical shipment import/export
+contract" below for the full behavior.
 
 Capacity validation note: release create/update endpoints (and the
 `in_flight` create/update endpoints below) compute "already released" capacity
@@ -336,6 +345,83 @@ from event rows. For capacity purposes only, `NULL` `good_emergence` is treated 
 which preserves the ability to apply loss-only corrections to historical rows. Any
 attempt to change a release quantity against such a row is still rejected as
 `GOOD_EMERGENCE_UNTRACKED`.
+
+### Historical shipment import/export contract
+
+Routes: `POST /api/tenant/shipments/import/{preview,commit}` (institution resolved from
+`x-tenant-slug`) and `POST /api/platform/institutions/[id]/shipments/import/{preview,commit}`
+(any institution, SUPERUSER only). Export: `GET /api/tenant/shipments/export` and
+`GET /api/platform/institutions/[id]/shipments/export`.
+
+**Canonical 13-column contract** (`CANONICAL_SHIPMENT_IMPORT_HEADERS`, single source of truth for
+header validation, export, and the blank template): `Species`, `Common name`, `No. rec`,
+`Supplier`, `Ship date`, `Arrival date`, `Emerg. in transit`, `Damag in transit`, `No. disea`,
+`No. parasit`, `No emerg`, `Poor emerg`, `Released`. Header matching is exact (case/whitespace-
+insensitive only, no fuzzy/alias matching) against this exact set — missing, duplicated, or
+unrecognized headers all block the entire workbook, collected and reported together. Every
+quantity column (`No. rec`, the six loss columns, `Released`) is validated against PostgreSQL's
+`integer` column maximum (`POSTGRES_INTEGER_MAX`, `2,147,483,647`) — both per source row and again
+on the post-grouping aggregate, since summing several individually in-bounds rows for the same
+shipment+species key can still overflow.
+
+**`Released` / `good_emergence` mapping**: a blank `Released` cell imports as SQL `NULL`
+(historically unknown); a numeric cell (including `0`) imports as that exact tracked value — never
+coalesced (`??`) with a missing/omitted value, which would silently turn "unknown" into "known
+zero." Export reverses this exactly: `NULL` → blank cell, any numeric value (including `0`) → the
+literal number.
+
+**Validation (`POST .../import/preview`)**: request `{ raw_text, source, allow_species_autocreate?
+}`; no database writes. `allow_species_autocreate` is optional and omitting it defaults to
+`false` — the same conservative default commit itself applies when its own `options.
+allow_species_autocreate` is omitted, so a preview and a commit that both omit it always agree on
+whether an unresolved species blocks. Validates the complete workbook — every row, every
+duplicate-species group, every quantity bound — and returns structured `issues` (each
+`{ rowNumber, rowNumbers?, field, value, message }`), the derived flat `row_errors` strings,
+non-blocking `existing_shipments` (shipments already on record, which commit will skip by default)
+and `unknown_suppliers` notices, the sorted distinct Arrival `years` found, and a `preview_hash`
+(SHA-256 over `raw_text` + institution id). An unresolved species that cannot legally be
+auto-created is a **blocking** issue; a tenant request always treats it as blocking regardless of
+the submitted option (tenants can never legally auto-create a species, enforced server-side even
+if a tenant request body sends `allow_species_autocreate: true`), while a platform/SUPERUSER
+request's unresolved species blocks when `allow_species_autocreate` is `false` (or omitted) and is
+only an informational notice (`unknown_species`) when it is `true`. Commit independently
+re-derives and re-validates this same decision from its own request's `options.
+allow_species_autocreate` — never from anything a prior preview call concluded — so a preview
+result only predicts what an _immediately following_ commit with the same option value will do,
+not what commit will do if that value, the raw text, or the catalog changes in between.
+
+**Commit (`POST .../import/commit`)**: request `{ raw_text, preview_hash, year, options? }` —
+`options: { allow_species_autocreate?, allow_duplicate_headers? }`. There is no `shipments` field;
+the server never receives or trusts a pre-grouped structure from the client — it re-derives and
+re-validates the _entire_ workbook from `raw_text` fresh on every single request (not only the
+requested year), rejecting the whole request if any blocking issue exists anywhere in the
+workbook. Tenant commits force `allow_species_autocreate: false` server-side regardless of what the
+request body asks for. One commit request covers exactly one Arrival-date year, inside one
+PostgreSQL transaction guarded by a per-institution `pg_try_advisory_xact_lock` (fails fast with
+`409 CONFLICT` if another commit is already running for the same institution; never blocks/waits).
+A failure anywhere in that transaction rolls back everything the request would have written for
+that year — there is no partial-success result. Response: `{ year, created, skipped, warnings }`.
+Already-existing shipments are skipped by default (not an error); `allow_duplicate_headers: true`
+creates them again anyway. Retrying a year (after fixing a failure, or simply re-running) is always
+safe: re-submit the same `raw_text`/`preview_hash`/`year` and already-committed shipments are
+detected and skipped automatically — there is no client-side resume token of any kind.
+
+Committing a full multi-year historical workbook means one request per Arrival year, in ascending
+order, each awaiting the previous response before starting the next (the client hook,
+`useShipmentImport`, does this automatically) — this does not run as a background job; closing or
+refreshing the page simply stops the sequence where it is, and already-committed years remain
+committed regardless.
+
+**Error responses specific to this contract**: `400 INVALID_REQUEST` with `error.details` naming
+each blocking issue's `path`/`message` (validation failure), `400 INVALID_REQUEST` for a
+`preview_hash` mismatch or a `year` absent from the validated workbook, `409 CONFLICT` for a commit
+already running for the institution.
+
+**Export**: always writes the same 13 canonical headers in the documented order, with `Released`
+as the 13th column, mapped directly from `shipment_items.good_emergence` (not recomputed from
+`remaining`/release events). Optional `from`/`to` query params filter by `shipment_date`. A real
+export's header row is guaranteed to pass this same strict validator unchanged — confirmed by a
+real commit → export → re-validate → re-import round trip against `flutr_import_test` (Phase 6).
 
 ### Tenant releases list contract
 

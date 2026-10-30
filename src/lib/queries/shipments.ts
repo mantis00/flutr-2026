@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db, type DbExecutor } from "@/lib/db";
 import { dateOnlyToUtcDate } from "@/lib/date-only";
 import {
   shipments,
@@ -13,6 +13,20 @@ import {
 import { ensureSpeciesLinksForInstitution } from "@/lib/queries/species";
 
 import type { CreateShipmentBody, UpdateShipmentBody } from "@/lib/validation/shipments";
+
+/**
+ * `createShipment()`'s own payload type — intentionally wider than the public, Zod-validated
+ * `CreateShipmentBody` it's otherwise identical to. `good_emergence` is deliberately NOT part of
+ * `CreateShipmentBody`/`shipmentItemCreateSchema` (the manual create/add-item routes' public
+ * input schema): widening that public schema once let any tenant user with ordinary
+ * shipment-create permission set Released directly through the API (see the Phase 3A/3B security
+ * review). Only a trusted internal caller — the historical importer, which validates its own
+ * input through the separate `shipmentImportDraftItemSchema` — should ever supply this field;
+ * the manual-create route never does, so its payloads are unaffected by this widening.
+ */
+export type CreateShipmentPayload = Omit<CreateShipmentBody, "items"> & {
+  items: (CreateShipmentBody["items"][number] & { good_emergence?: number | null })[];
+};
 
 export const SHIPMENT_ERRORS = {
   CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
@@ -263,10 +277,19 @@ export async function getShipmentWithItems(institutionId: number, shipmentId: nu
 }
 
 /**
- * Create shipment with line items
+ * Create shipment with line items.
+ *
+ * Pass `executor` (a `db.transaction` callback's `tx`) to make this participate in a
+ * caller-owned transaction instead of opening its own — used by the historical importer's
+ * year-scoped atomic commit (a later phase). Every existing caller omits it and gets today's
+ * exact behavior: its own, self-contained transaction.
  */
-export async function createShipment(institutionId: number, payload: CreateShipmentBody) {
-  return db.transaction(async (tx) => {
+export async function createShipment(
+  institutionId: number,
+  payload: CreateShipmentPayload,
+  executor?: DbExecutor,
+) {
+  const run = async (tx: DbExecutor) => {
     const [inserted] = await tx
       .insert(shipments)
       .values({
@@ -288,6 +311,10 @@ export async function createShipment(institutionId: number, payload: CreateShipm
       parasite: item.parasite,
       non_emergence: item.non_emergence,
       poor_emergence: item.poor_emergence,
+      // Never `item.good_emergence ?? 0` — `??` treats an explicit `null` (historically
+      // unknown) the same as `undefined` (field omitted by a manual-create caller), which
+      // would silently turn "unknown" into "known zero." Only an omitted field defaults to 0.
+      good_emergence: item.good_emergence === undefined ? 0 : item.good_emergence,
     }));
 
     await ensureSpeciesLinksForInstitution(
@@ -298,19 +325,27 @@ export async function createShipment(institutionId: number, payload: CreateShipm
     await tx.insert(shipment_items).values(items);
 
     return inserted.id;
-  });
+  };
+
+  if (executor) return run(executor);
+  return db.transaction((tx) => run(tx));
 }
 
 /**
  * Check whether a shipment header already exists for the same tenant and key.
+ *
+ * Accepts an optional `executor` so a caller can run this check inside its own transaction
+ * (e.g. a fresh re-check immediately before inserting, to close the gap between an earlier
+ * read and the write) — defaults to the plain `db` client, identical to today's behavior.
  */
 export async function shipmentHeaderExists(
   institutionId: number,
   supplierCode: string,
   shipmentDate: Date,
   arrivalDate: Date,
+  executor: DbExecutor = db,
 ) {
-  const [row] = await db
+  const [row] = await executor
     .select({ id: shipments.id })
     .from(shipments)
     .where(
@@ -392,6 +427,9 @@ export async function listShipmentExportRows(
       parasite: shipment_items.parasite,
       nonEmergence: shipment_items.non_emergence,
       poorEmergence: shipment_items.poor_emergence,
+      // Not yet read by the exporter service/workbook (later phase) — selected now so the
+      // query layer already carries it.
+      goodEmergence: shipment_items.good_emergence,
     })
     .from(shipment_items)
     .innerJoin(

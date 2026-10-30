@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-const isoDateTimeSchema = z.string().datetime();
-
 export const importSourceSchema = z
   .object({
     kind: z.enum(["xlsx", "xls", "csv", "tsv", "txt", "paste"]),
@@ -13,28 +11,27 @@ export const shipmentImportPreviewRequestSchema = z
   .object({
     raw_text: z.string().min(1).max(2_000_000),
     source: importSourceSchema,
+    /** The caller's actual intent for this validation pass — not a role-eligibility flag. Omitted
+     * (or a tenant request, which force-disables this server-side regardless of what's sent)
+     * defaults to `false`, matching commit's own conservative default
+     * (`options?.allow_species_autocreate ?? false`), so a preview with this field omitted never
+     * disagrees with a commit that also omits it. */
+    allow_species_autocreate: z.boolean().optional(),
   })
   .strict();
 
-const shipmentImportDraftItemSchema = z
+/**
+ * Mirrors `ShipmentImportIssue` from `shipment-import-parser.ts` — structured validation
+ * problems, suitable for a future downloadable report, distinct from the derived flat
+ * `row_errors` strings kept below for backward compatibility with the existing UI.
+ */
+export const shipmentImportIssueSchema = z
   .object({
-    scientific_name: z.string().trim().min(1).max(200),
-    number_received: z.number().int().min(0),
-    emerged_in_transit: z.number().int().min(0),
-    damaged_in_transit: z.number().int().min(0),
-    diseased_in_transit: z.number().int().min(0),
-    parasite: z.number().int().min(0),
-    non_emergence: z.number().int().min(0),
-    poor_emergence: z.number().int().min(0),
-  })
-  .strict();
-
-export const shipmentImportDraftSchema = z
-  .object({
-    supplier_code: z.string().trim().min(1).max(50),
-    shipment_date: isoDateTimeSchema,
-    arrival_date: isoDateTimeSchema,
-    items: z.array(shipmentImportDraftItemSchema).min(1),
+    rowNumber: z.number().int().positive().nullable(),
+    rowNumbers: z.array(z.number().int().positive()).optional(),
+    field: z.string().nullable(),
+    value: z.string().nullable(),
+    message: z.string().min(1),
   })
   .strict();
 
@@ -54,7 +51,22 @@ export const shipmentImportPreviewResponseSchema = z
     warnings: z.array(z.string().min(1)),
     unknown_species: z.array(z.string().min(1)),
     unknown_suppliers: z.array(z.string().min(1)),
-    shipments: z.array(shipmentImportDraftSchema),
+    /** Structured validation problems (headers, rows, duplicate-species groups, and — for a
+     * tenant request, where species auto-create can never legally happen — unresolved species).
+     * `row_errors` above is `issues.map(formatShipmentImportIssue)`, not a second source of
+     * truth. */
+    issues: z.array(shipmentImportIssueSchema),
+    /** Non-blocking: shipment labels that already exist for this institution and would be
+     * skipped by default on commit (not a validation error). */
+    existing_shipments: z.array(z.string().min(1)),
+    /** Sorted, distinct Arrival-date years across every valid (non-excluded) shipment — for the
+     * year-by-year progress UI (Phase 5) and for selecting a `year` to commit. */
+    years: z.array(z.number().int()),
+    /** Hash scoped to `raw_text` itself (Phase 3A's resolved architecture) — the only hash
+     * concept now; resubmitted unchanged with each year-commit request. The Phase 3B-era
+     * `raw_text_hash`/legacy-`preview_hash` split and the legacy `shipments` field have been
+     * retired now that the commit endpoint re-derives everything from `raw_text` itself (Phase
+     * 3C) instead of trusting a resubmitted shipments array. */
     preview_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   })
   .strict();
@@ -66,20 +78,28 @@ export const shipmentImportCommitOptionsSchema = z
   })
   .strict();
 
+/**
+ * Year-scoped commit request (Phase 3C). The server never receives or trusts a pre-grouped
+ * shipments structure — it re-derives everything itself from `raw_text`, which must be
+ * byte-identical to what `preview_hash` was computed over during validate/preview. A commit
+ * request carrying the old `{ preview_hash, shipments, options }` shape fails this schema's
+ * `.strict()` check (missing `raw_text`/`year`, unrecognized `shipments`), so a stale client
+ * cannot accidentally write partial or unvalidated data through this endpoint.
+ */
 export const shipmentImportCommitRequestSchema = z
   .object({
+    raw_text: z.string().min(1).max(2_000_000),
     preview_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    shipments: z.array(shipmentImportDraftSchema).min(1),
+    year: z.number().int(),
     options: shipmentImportCommitOptionsSchema.optional(),
   })
   .strict();
 
 export const shipmentImportCommitResponseSchema = z
   .object({
+    year: z.number().int(),
     created: z.number().int().min(0),
-    failed: z.number().int().min(0),
     skipped: z.number().int().min(0),
-    failures: z.array(z.string().min(1)),
     warnings: z.array(z.string().min(1)),
   })
   .strict();
@@ -121,7 +141,6 @@ export const shipmentDeleteBodySchema = z.discriminatedUnion("mode", [
 export type ShipmentDeleteBody = z.infer<typeof shipmentDeleteBodySchema>;
 
 export type ShipmentImportPreviewRequest = z.infer<typeof shipmentImportPreviewRequestSchema>;
-export type ShipmentImportDraft = z.infer<typeof shipmentImportDraftSchema>;
 export type ShipmentImportPreviewResponse = z.infer<typeof shipmentImportPreviewResponseSchema>;
 export type ShipmentImportCommitRequest = z.infer<typeof shipmentImportCommitRequestSchema>;
 export type ShipmentImportCommitResponse = z.infer<typeof shipmentImportCommitResponseSchema>;

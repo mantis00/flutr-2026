@@ -65,6 +65,16 @@ function validateLossesWithinReceived(
   }
 }
 
+// Deliberately has no `good_emergence` field: this schema validates untrusted input for the
+// public manual shipment create/add-item routes, and `.strict()` rejects any unrecognized key
+// outright. A Phase 2 widening briefly added an optional `good_emergence` field here so
+// `createShipment()`'s payload type could carry one for the (not-yet-wired) historical importer
+// — but since this schema is also what the manual-create API validates against, that widening
+// let any tenant user with ordinary shipment-create permission set Released directly through the
+// public API, bypassing the product's approved admin-only direct-editing design. Reverted at the
+// Phase 3A/3B security review; `createShipment()`'s own parameter type now carries the field
+// instead (see `CreateShipmentPayload` in `queries/shipments.ts`), without widening this public
+// schema at all.
 const shipmentItemCreateSchema = z
   .object({
     butterfly_species_id: z.number({ message: "Butterfly species is required" }).int().positive(),
