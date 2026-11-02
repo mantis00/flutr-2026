@@ -1,6 +1,9 @@
 import { GuideHeader, GuideNote } from "@/components/tenant/guides/guide-step";
+import { canReadGuides } from "@/lib/guides-access";
 
-export default function ImportGuidePage() {
+export default async function ImportGuidePage() {
+  if (!(await canReadGuides())) return null;
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-6 py-10">
       <GuideHeader

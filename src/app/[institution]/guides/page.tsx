@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/accordion";
 import { GUIDE_ITEMS } from "@/components/tenant/guides/guide-items";
 import { ROUTES } from "@/lib/routes";
+import { canReadGuides } from "@/lib/guides-access";
 
 const FAQS = [
   {
@@ -31,6 +32,8 @@ const FAQS = [
 ];
 
 export default async function GuidesPage({ params }: { params: Promise<{ institution: string }> }) {
+  if (!(await canReadGuides())) return null;
+
   const { institution } = await params;
 
   return (
@@ -38,8 +41,8 @@ export default async function GuidesPage({ params }: { params: Promise<{ institu
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Guides</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          How to use Flutr, one area at a time. These pages are only visible to people signed in to
-          your institution.
+          How to use Flutr, one area at a time. These pages are private: staff reach them by signing
+          in, or with the shared guides password.
         </p>
       </div>
 
