@@ -10,6 +10,10 @@ export const GUIDES_COOKIE = "guides_access";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 function guidesPassword(): string {
+  // ponytail: one shared password, a default that is published in this repo, and
+  // no attempt limit on the unlock form. Deliberate — this gates documentation,
+  // not data. Set GUIDES_PASSWORD and add throttling before it guards anything
+  // worth guessing at.
   return process.env.GUIDES_PASSWORD || "flutr2026";
 }
 
