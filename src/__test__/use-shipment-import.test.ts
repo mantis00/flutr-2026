@@ -1,5 +1,5 @@
 /**
- * Phase 5A: tests for the pure, React-free year-by-year commit orchestration exported alongside
+ * Tests for the pure, React-free year-by-year commit orchestration exported alongside
  * `useShipmentImport`. Following this repo's established convention (see `use-species-search.ts`'s
  * own tests) of testing a hook's logic as plain functions rather than rendering the hook itself —
  * `@testing-library/react` isn't installed in this project and isn't introduced for this.
@@ -12,6 +12,7 @@ import {
   computeImportProgressSummary,
   createCommitRunGuard,
   createLatestRequestGuard,
+  findImportingYear,
   markPendingAsNotAttempted,
   runYearByYearCommit,
   sumYearProgressTotals,
@@ -44,8 +45,13 @@ function buildPreview(overrides: Partial<PreviewResponse> = {}): PreviewResponse
 
 const OPTIONS = { allow_species_autocreate: false, allow_duplicate_headers: false };
 
-function commitOf(year: number, created: number, skipped: number): CommitResponse {
-  return { year, created, skipped, warnings: [] };
+function commitOf(
+  year: number,
+  created: number,
+  skipped: number,
+  warnings: string[] = [],
+): CommitResponse {
+  return { year, created, skipped, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +141,34 @@ describe("sumYearProgressTotals", () => {
   });
 });
 
+describe("findImportingYear", () => {
+  it("returns null when there is no progress yet", () => {
+    expect(findImportingYear(null)).toBeNull();
+  });
+
+  it("returns null when every year is pending or not yet started", () => {
+    expect(findImportingYear(buildInitialYearProgress([2024, 2025]))).toBeNull();
+  });
+
+  it("returns the one year currently importing", () => {
+    const progress: YearProgress[] = [
+      { year: 2024, status: "completed", created: 1, skipped: 0 },
+      { year: 2025, status: "importing", created: 0, skipped: 0 },
+      { year: 2026, status: "pending", created: 0, skipped: 0 },
+    ];
+    expect(findImportingYear(progress)).toBe(2025);
+  });
+
+  it("returns null once every year has finished (completed, failed, or not_attempted)", () => {
+    const progress: YearProgress[] = [
+      { year: 2024, status: "completed", created: 1, skipped: 0 },
+      { year: 2025, status: "failed", created: 0, skipped: 0, error: "boom" },
+      { year: 2026, status: "not_attempted", created: 0, skipped: 0 },
+    ];
+    expect(findImportingYear(progress)).toBeNull();
+  });
+});
+
 describe("computeImportProgressSummary", () => {
   it("computes percent, completed count, and allCompleted for a fully successful run", () => {
     const progress: YearProgress[] = [
@@ -208,7 +242,6 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: () => {},
-      shouldAbort: () => false,
     });
 
     expect(callOrder).toEqual([2002, 2013, 2025]);
@@ -235,7 +268,6 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: (progress) => progressSnapshots.push(progress),
-      shouldAbort: () => false,
     });
 
     expect(result.stoppedEarly).toBe(false);
@@ -265,7 +297,6 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: () => {},
-      shouldAbort: () => false,
     });
 
     expect(result.stoppedEarly).toBe(true);
@@ -295,7 +326,6 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: () => {},
-      shouldAbort: () => false,
     });
 
     expect(result.stoppedEarly).toBe(true);
@@ -307,8 +337,12 @@ describe("runYearByYearCommit", () => {
     expect(result.progress[2].status).toBe("not_attempted");
   });
 
-  it("stops immediately when shouldAbort is already true, without calling runCommit", async () => {
-    const runCommit = jest.fn(async (body) => commitOf(body.year, 1, 0));
+  it("accumulates warnings across every completed year, and sums created/skipped, not just the last year's", async () => {
+    const runCommit = jest.fn(async (body) =>
+      body.year === 2024
+        ? commitOf(2024, 1, 0, ["Supplier ACME was auto-created as inactive for global review."])
+        : commitOf(body.year, 2, 1, ["Species unknown sp. was auto-created in master list."]),
+    );
 
     const result = await runYearByYearCommit({
       years: [2024, 2025],
@@ -317,12 +351,31 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: () => {},
-      shouldAbort: () => true,
     });
 
-    expect(runCommit).not.toHaveBeenCalled();
-    expect(result.stoppedEarly).toBe(true);
-    expect(result.progress.every((item) => item.status === "not_attempted")).toBe(true);
+    expect(result.warnings).toEqual([
+      "Supplier ACME was auto-created as inactive for global review.",
+      "Species unknown sp. was auto-created in master list.",
+    ]);
+    expect(sumYearProgressTotals(result.progress)).toEqual({ created: 3, skipped: 1 });
+  });
+
+  it("stops collecting warnings from a year that never completes — a failed year's own warnings are not included", async () => {
+    const runCommit = jest.fn(async (body) => {
+      if (body.year === 2010) throw new Error("accounting bound violated");
+      return commitOf(body.year, 1, 0, [`warning for ${body.year}`]);
+    });
+
+    const result = await runYearByYearCommit({
+      years: [2002, 2010, 2020],
+      rawText: "raw",
+      previewHash: "sha256:abc",
+      options: OPTIONS,
+      runCommit,
+      onProgress: () => {},
+    });
+
+    expect(result.warnings).toEqual(["warning for 2002"]);
   });
 
   it("a revalidation-required retry simply reruns every year from scratch (no client-only resume token) — already-committed years are reported again and rely on server-side skip", async () => {
@@ -343,7 +396,6 @@ describe("runYearByYearCommit", () => {
       options: OPTIONS,
       runCommit,
       onProgress: () => {},
-      shouldAbort: () => false,
     });
 
     expect(runCommit).toHaveBeenCalledWith(expect.objectContaining({ year: 2024 }));
@@ -353,68 +405,25 @@ describe("runYearByYearCommit", () => {
 });
 
 // ---------------------------------------------------------------------------
-// createCommitRunGuard — duplicate-click protection and stale-run invalidation
+// createCommitRunGuard — duplicate-click protection
 // ---------------------------------------------------------------------------
 
 describe("createCommitRunGuard", () => {
   it("refuses a second concurrent start while a run is active (duplicate-click protection)", () => {
     const guard = createCommitRunGuard();
-    const first = guard.tryStart();
-    expect(first).not.toBeNull();
+    expect(guard.tryStart()).toBe(true);
+    expect(guard.isActive).toBe(true);
 
-    const second = guard.tryStart();
-    expect(second).toBeNull(); // the duplicate click is ignored, not a second run
+    expect(guard.tryStart()).toBe(false); // the duplicate click is ignored, not a second run
   });
 
   it("allows a new run to start again after finish()", () => {
     const guard = createCommitRunGuard();
-    const first = guard.tryStart();
+    guard.tryStart();
     guard.finish();
 
-    const second = guard.tryStart();
-    expect(second).not.toBeNull();
-    expect(second).not.toBe(first);
-  });
-
-  it("invalidate() changes the generation so a stale in-flight run's isCurrent check fails (workbook/option change mid-run)", () => {
-    const guard = createCommitRunGuard();
-    const runId = guard.tryStart()!;
-    expect(guard.isCurrent(runId)).toBe(true);
-
-    guard.invalidate(); // e.g. the user changed the pasted workbook text mid-run
-    expect(guard.isCurrent(runId)).toBe(false);
-  });
-
-  it("invalidate() also clears the active flag, so a new run can start immediately", () => {
-    const guard = createCommitRunGuard();
-    guard.tryStart();
-    guard.invalidate();
     expect(guard.isActive).toBe(false);
-    expect(guard.tryStart()).not.toBeNull();
-  });
-
-  it("drives runYearByYearCommit's shouldAbort: a run invalidated mid-sequence stops cleanly without corrupting later state", async () => {
-    const guard = createCommitRunGuard();
-    const runId = guard.tryStart()!;
-
-    const runCommit = jest.fn(async (body) => {
-      if (body.year === 2010) guard.invalidate(); // simulate a workbook change arriving mid-request
-      return commitOf(body.year, 1, 0);
-    });
-
-    const result = await runYearByYearCommit({
-      years: [2002, 2010, 2020],
-      rawText: "raw",
-      previewHash: "sha256:abc",
-      options: OPTIONS,
-      runCommit,
-      onProgress: () => {},
-      shouldAbort: () => !guard.isCurrent(runId),
-    });
-
-    expect(result.stoppedEarly).toBe(true);
-    // 2020 is never even attempted once the run is invalidated after 2010's response lands.
-    expect(runCommit).toHaveBeenCalledTimes(2);
+    expect(guard.tryStart()).toBe(true);
   });
 });
 

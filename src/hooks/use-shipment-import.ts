@@ -18,7 +18,7 @@ type ApiError = {
 };
 
 // ---------------------------------------------------------------------------
-// Pure year-by-year commit orchestration (Phase 5A)
+// Pure year-by-year commit orchestration
 //
 // Deliberately React-free so it can be unit-tested directly, consistent with this repo's
 // established convention (see `use-species-search.ts`) of testing a hook's logic as plain
@@ -108,6 +108,14 @@ export function computeImportProgressSummary(progress: YearProgress[]): {
   return { total, completedCount, failedEntry, percent, allCompleted };
 }
 
+/** The year currently importing, or `null` when none is (before the run starts, between years,
+ * or after it ends) — the single source of truth for the live "Importing year N…" announcement,
+ * kept as a pure function so the decision logic is testable independent of when/whether the
+ * announcing element happens to be mounted. */
+export function findImportingYear(progress: YearProgress[] | null): number | null {
+  return progress?.find((item) => item.status === "importing")?.year ?? null;
+}
+
 export function buildYearCommitRequestBody(
   rawText: string,
   previewHash: string,
@@ -131,18 +139,19 @@ export type YearCommitRunResult = {
   stoppedEarly: boolean;
   failedYear: number | null;
   failedMessage: string | null;
+  /** Every warning from every year that actually completed, in year order — not just the last
+   * year's. These are the operator's only signal that an import auto-created a global supplier
+   * or species, so dropping any of them silently hides governance-relevant information. */
+  warnings: string[];
 };
 
 /**
- * Pure, React-free year-by-year commit orchestrator (Phase 5A core logic).
+ * Pure, React-free year-by-year commit orchestrator.
  *
  * Runs the given years in ascending order, one request at a time, awaiting each response before
  * starting the next. Stops at the first failure and marks every remaining `pending` year
  * `not_attempted` — earlier `completed` years are left exactly as they are, never retried or
- * rolled back client-side (the server already committed them in their own transaction). Checks
- * `shouldAbort()` before starting a year and again after every await, so a caller (the real hook)
- * can cooperatively cancel a stale run — e.g. the workbook changed — without this function
- * needing to know anything about React state or closures.
+ * rolled back client-side (the server already committed them in their own transaction).
  */
 export async function runYearByYearCommit({
   years,
@@ -151,7 +160,6 @@ export async function runYearByYearCommit({
   options,
   runCommit,
   onProgress,
-  shouldAbort,
 }: {
   years: number[];
   rawText: string;
@@ -159,7 +167,6 @@ export async function runYearByYearCommit({
   options: ShipmentImportOptions;
   runCommit: YearCommitRunner;
   onProgress: (progress: YearProgress[]) => void;
-  shouldAbort: () => boolean;
 }): Promise<YearCommitRunResult> {
   let progress = buildInitialYearProgress(years);
   onProgress(progress);
@@ -168,13 +175,9 @@ export async function runYearByYearCommit({
   let completedCount = 0;
   let failedYear: number | null = null;
   let failedMessage: string | null = null;
+  const warnings: string[] = [];
 
   for (const year of progress.map((item) => item.year)) {
-    if (shouldAbort()) {
-      stoppedEarly = true;
-      break;
-    }
-
     progress = updateYearProgress(progress, year, { status: "importing" });
     onProgress(progress);
 
@@ -182,20 +185,11 @@ export async function runYearByYearCommit({
     try {
       result = await runCommit(buildYearCommitRequestBody(rawText, previewHash, year, options));
     } catch (error) {
-      if (shouldAbort()) {
-        stoppedEarly = true;
-        break;
-      }
       failedYear = year;
       failedMessage =
         error instanceof Error && error.message ? error.message : "Import failed for this year.";
       progress = updateYearProgress(progress, year, { status: "failed", error: failedMessage });
       onProgress(progress);
-      stoppedEarly = true;
-      break;
-    }
-
-    if (shouldAbort()) {
       stoppedEarly = true;
       break;
     }
@@ -207,6 +201,7 @@ export async function runYearByYearCommit({
     });
     onProgress(progress);
     completedCount += 1;
+    warnings.push(...result.warnings);
   }
 
   if (stoppedEarly) {
@@ -214,38 +209,26 @@ export async function runYearByYearCommit({
     onProgress(progress);
   }
 
-  return { progress, completedCount, stoppedEarly, failedYear, failedMessage };
+  return { progress, completedCount, stoppedEarly, failedYear, failedMessage, warnings };
 }
 
 /**
- * A tiny, React-free guard against duplicate/concurrent commit runs and against a stale run
- * corrupting state after the workbook or options changed mid-run. `tryStart` returns `null` (and
- * leaves everything unchanged) if a run is already active — the duplicate-click/concurrent-call
- * guard. `invalidate` bumps the generation without starting a new run — called whenever the
- * workbook, paste text, or import options change, so any in-flight loop's `shouldAbort` check (via
- * `isCurrent`) sees a mismatch and stops cooperatively instead of applying a stale response to a
- * newly-selected workbook.
+ * A tiny, React-free guard against duplicate/concurrent commit runs. `tryStart` returns `false`
+ * (and leaves everything unchanged) if a run is already active — every workbook/option-changing
+ * setter in the hook also checks `isActive` and refuses to act while a run is in progress, so
+ * there is nothing a mid-run change needs to cooperatively cancel.
  */
 export function createCommitRunGuard() {
-  let generation = 0;
   let active = false;
 
   return {
-    tryStart(): number | null {
-      if (active) return null;
+    tryStart(): boolean {
+      if (active) return false;
       active = true;
-      generation += 1;
-      return generation;
+      return true;
     },
     finish() {
       active = false;
-    },
-    invalidate() {
-      generation += 1;
-      active = false;
-    },
-    isCurrent(id: number): boolean {
-      return id === generation;
     },
     get isActive() {
       return active;
@@ -254,12 +237,12 @@ export function createCommitRunGuard() {
 }
 
 /**
- * A tiny, React-free guard against a stale async response overwriting newer state. First added
- * for preview responses (manual QA finding: an in-flight "Parse preview" request can resolve
- * after the workbook, source, or `allow_species_autocreate` toggle has already changed — or
- * after a second "Parse preview" has already started — and would otherwise repopulate
- * `preview`/`errorMessage` with a result that no longer corresponds to the current intent), and
- * reused with its own separate instance for file-read responses (a dropped/selected file's read
+ * A tiny, React-free guard against a stale async response overwriting newer state. Used for
+ * preview responses (an in-flight "Parse preview" request can resolve after the workbook,
+ * source, or `allow_species_autocreate` toggle has already changed — or after a second "Parse
+ * preview" has already started — and would otherwise repopulate `preview`/`errorMessage` with a
+ * result that no longer corresponds to the current intent), and reused with its own separate
+ * instance for file-read responses (a dropped/selected file's read
  * can resolve after a newer file was selected, text was pasted, or the form was reset — the same
  * shape of problem, a different async operation). Unlike `createCommitRunGuard`, there is no
  * "active" concept to refuse a second start with: a new request is always allowed to start
@@ -342,7 +325,7 @@ export function useShipmentImport({
   const [exportTo, setExportTo] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
-  // Duplicate-run / stale-response guard (Phase 5A) — see `createCommitRunGuard` above.
+  // Duplicate-run guard — see `createCommitRunGuard` above.
   const runGuardRef = useRef(createCommitRunGuard());
   // Stale-preview-response guard — see `createLatestRequestGuard` above.
   const previewGuardRef = useRef(createLatestRequestGuard());
@@ -459,17 +442,16 @@ export function useShipmentImport({
   function setAllowSpeciesAutocreate(value: boolean) {
     if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
     setAllowSpeciesAutocreateState(value);
-    // Manual QA finding 1 fix: this toggle changes what preview itself will report (an
-    // unresolved species blocks when it's off, is informational when it's on) — a preview
-    // validated under the old value must not be treated as still valid for a commit that will
-    // use the new one. Invalidating forces a fresh "Parse preview" against the new intent, the
-    // same way changing the raw text or source already does. `bump()` additionally covers the
-    // in-flight case: a preview request already sent under the old value must not be allowed to
-    // resolve and silently repopulate `preview` after the toggle has since changed (the
-    // in-flight-preview race found during manual QA follow-up). `setIsParsing(false)` closes a
-    // further gap in that same fix: without it, an invalidated in-flight request's own `finally`
-    // correctly skips clearing the indicator (it's no longer current), but nothing else ever
-    // clears it either if no further preview is started — leaving it stuck on indefinitely.
+    // This toggle changes what preview itself will report (an unresolved species blocks when
+    // it's off, is informational when it's on) — a preview validated under the old value must
+    // not be treated as still valid for a commit that will use the new one. Invalidating forces a
+    // fresh "Parse preview" against the new intent, the same way changing the raw text or source
+    // already does. `bump()` additionally covers the in-flight case: a preview request already
+    // sent under the old value must not be allowed to resolve and silently repopulate `preview`
+    // after the toggle has since changed. `setIsParsing(false)` closes a further gap in that same
+    // fix: without it, an invalidated in-flight request's own `finally` correctly skips clearing
+    // the indicator (it's no longer current), but nothing else ever clears it either if no
+    // further preview is started — leaving it stuck on indefinitely.
     previewGuardRef.current.bump();
     setIsParsing(false);
     setPreview(null);
@@ -563,8 +545,8 @@ export function useShipmentImport({
       return;
     }
 
-    const runId = runGuardRef.current.tryStart();
-    if (runId === null) return; // duplicate click / concurrent call — ignore
+    const started = runGuardRef.current.tryStart();
+    if (!started) return; // duplicate click / concurrent call — ignore
 
     setIsImporting(true);
     setErrorMessage(null);
@@ -604,22 +586,20 @@ export function useShipmentImport({
       options: capturedOptions,
       runCommit,
       onProgress: setYearProgress,
-      shouldAbort: () => !runGuardRef.current.isCurrent(runId),
     });
-
-    if (!runGuardRef.current.isCurrent(runId)) {
-      // Superseded by a newer run or a workbook/option change — that newer action already reset
-      // every piece of state it cares about; do not touch anything further here.
-      return;
-    }
 
     const lastCompleted = result.progress.filter((item) => item.status === "completed").at(-1);
     if (lastCompleted) {
+      // Totals and warnings cover every completed year in this run, not just the last one —
+      // `sumYearProgressTotals` already aggregates correctly; `result.warnings` carries every
+      // completed year's warnings in order (see `runYearByYearCommit`). `year` keeps the last
+      // completed year for display context only; it is not used to scope created/skipped/warnings.
+      const totals = sumYearProgressTotals(result.progress);
       setCommitSummary({
         year: lastCompleted.year,
-        created: lastCompleted.created,
-        skipped: lastCompleted.skipped,
-        warnings: [],
+        created: totals.created,
+        skipped: totals.skipped,
+        warnings: result.warnings,
       });
     }
 
