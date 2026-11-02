@@ -138,7 +138,7 @@ export function filterRowsByDateRange<T extends { shipmentDate: string }>(
 }
 
 // ---------------------------------------------------------------------------
-// Downloadable validation report (Phase 5B)
+// Downloadable validation report
 // ---------------------------------------------------------------------------
 
 /**
@@ -242,7 +242,7 @@ export function buildValidationReportCsv(issues: ShipmentImportIssue[]): string 
 }
 
 // ---------------------------------------------------------------------------
-// Blank import template (Phase 5B)
+// Blank import template
 // ---------------------------------------------------------------------------
 
 /** The blank template's only content: one header row, the 13 canonical columns, no data rows —

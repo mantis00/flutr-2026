@@ -186,9 +186,9 @@ export async function getSpeciesById(speciesId: number) {
  *
  * Accepts an optional `executor` (a `db.transaction` callback's `tx`) so this can participate
  * in a caller-owned transaction instead of writing outside it — used by the historical
- * importer's year-scoped atomic commit (a later phase), so an auto-created species never
- * persists if that transaction later rolls back. Defaults to the plain `db` client, identical
- * to today's behavior, for every existing caller (including the platform species admin route).
+ * importer's year-scoped atomic commit, so an auto-created species never persists if that
+ * transaction later rolls back. Defaults to the plain `db` client, identical to today's behavior,
+ * for every existing caller (including the platform species admin route).
  */
 export async function createSpecies(input: CreateSpeciesBody, executor: DbExecutor = db) {
   const [row] = await executor.insert(butterfly_species).values(input).returning();

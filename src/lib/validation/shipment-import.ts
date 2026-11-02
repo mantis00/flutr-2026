@@ -60,13 +60,11 @@ export const shipmentImportPreviewResponseSchema = z
      * skipped by default on commit (not a validation error). */
     existing_shipments: z.array(z.string().min(1)),
     /** Sorted, distinct Arrival-date years across every valid (non-excluded) shipment — for the
-     * year-by-year progress UI (Phase 5) and for selecting a `year` to commit. */
+     * year-by-year progress UI and for selecting a `year` to commit. */
     years: z.array(z.number().int()),
-    /** Hash scoped to `raw_text` itself (Phase 3A's resolved architecture) — the only hash
-     * concept now; resubmitted unchanged with each year-commit request. The Phase 3B-era
-     * `raw_text_hash`/legacy-`preview_hash` split and the legacy `shipments` field have been
-     * retired now that the commit endpoint re-derives everything from `raw_text` itself (Phase
-     * 3C) instead of trusting a resubmitted shipments array. */
+    /** Hash scoped to `raw_text` itself — resubmitted unchanged with each year-commit request.
+     * The commit endpoint re-derives everything from `raw_text` itself rather than trusting a
+     * resubmitted shipments array, so this hash is a same-input integrity check only. */
     preview_hash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   })
   .strict();
@@ -79,12 +77,11 @@ export const shipmentImportCommitOptionsSchema = z
   .strict();
 
 /**
- * Year-scoped commit request (Phase 3C). The server never receives or trusts a pre-grouped
- * shipments structure — it re-derives everything itself from `raw_text`, which must be
- * byte-identical to what `preview_hash` was computed over during validate/preview. A commit
- * request carrying the old `{ preview_hash, shipments, options }` shape fails this schema's
- * `.strict()` check (missing `raw_text`/`year`, unrecognized `shipments`), so a stale client
- * cannot accidentally write partial or unvalidated data through this endpoint.
+ * Year-scoped commit request. The server never receives or trusts a pre-grouped shipments
+ * structure — it re-derives everything itself from `raw_text`, which must be byte-identical to
+ * what `preview_hash` was computed over during validate/preview. `.strict()` rejects any request
+ * carrying an unrecognized `shipments` field, so a stale client cannot accidentally write partial
+ * or unvalidated data through this endpoint.
  */
 export const shipmentImportCommitRequestSchema = z
   .object({
