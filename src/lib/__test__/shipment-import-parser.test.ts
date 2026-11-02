@@ -202,6 +202,17 @@ describe("shipment-import-parser", () => {
     it("rejects non-numeric text", () => {
       expect(parseReleasedQuantity("unknown")).toEqual({ kind: "invalid" });
     });
+
+    it("still accepts a comma-grouped integer (no regression)", () => {
+      expect(parseReleasedQuantity("12,345")).toEqual({ kind: "value", value: 12345 });
+    });
+
+    it("rejects malformed comma grouping (shares the grouping check with parseNonNegativeInteger)", () => {
+      expect(parseReleasedQuantity("1,2")).toEqual({ kind: "invalid" });
+      expect(parseReleasedQuantity("1,00")).toEqual({ kind: "invalid" });
+      expect(parseReleasedQuantity(",1")).toEqual({ kind: "invalid" });
+      expect(parseReleasedQuantity("1,,0")).toEqual({ kind: "invalid" });
+    });
   });
 
   describe("parseShipmentImportRowsStrict", () => {
@@ -434,6 +445,30 @@ describe("shipment-import-parser", () => {
         expect(parseNonNegativeInteger("1,000", { required: true })).toBe(1000);
       });
 
+      it("still accepts a multi-group comma-grouped integer (no regression)", () => {
+        expect(parseNonNegativeInteger("12,345,678", { required: true })).toBe(12345678);
+      });
+
+      it("still accepts a plain, ungrouped integer longer than three digits (no regression)", () => {
+        expect(parseNonNegativeInteger("1234", { required: true })).toBe(1234);
+      });
+
+      it("rejects a comma in the wrong position (not a thousands boundary)", () => {
+        expect(parseNonNegativeInteger("1,2", { required: true })).toBeNull();
+      });
+
+      it("rejects a grouped segment with fewer than three digits", () => {
+        expect(parseNonNegativeInteger("1,00", { required: true })).toBeNull();
+      });
+
+      it("rejects a leading comma", () => {
+        expect(parseNonNegativeInteger(",1", { required: true })).toBeNull();
+      });
+
+      it("rejects a doubled comma", () => {
+        expect(parseNonNegativeInteger("1,,0", { required: true })).toBeNull();
+      });
+
       it("still rejects a negative value", () => {
         expect(parseNonNegativeInteger("-5", { required: true })).toBeNull();
       });
@@ -477,6 +512,39 @@ describe("shipment-import-parser", () => {
       );
       expect(result.rows).toHaveLength(0);
       expect(result.rowErrors[0]).toContain("Poor emerg must be a non-negative integer");
+    });
+
+    it("blocks a malformed comma-grouped No. rec value instead of silently reinterpreting it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "1,2" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("No. rec must be a non-negative integer");
+    });
+
+    it("blocks a malformed comma-grouped loss-column value instead of silently reinterpreting it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ emerg: "1,00" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("Emerg. in transit must be a non-negative integer");
+    });
+
+    it("blocks a malformed comma-grouped Released value instead of silently reinterpreting it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: ",1" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("Released must be a non-negative integer or blank");
+    });
+
+    it("accepts a properly thousands-grouped No. rec value (no regression)", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "1,234", released: "1,000" })].join("\n"),
+      );
+      expect(result.rowErrors).toEqual([]);
+      expect(result.rows[0]?.numberReceived).toBe(1234);
+      expect(result.rows[0]?.goodEmergence).toBe(1000);
     });
 
     it("still parses blank Released as unknown and explicit zero as known zero after adding the upper bound (no regression)", () => {

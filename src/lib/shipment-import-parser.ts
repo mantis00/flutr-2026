@@ -38,6 +38,31 @@ export function splitDelimitedLine(line: string, delimiter: string) {
   return cells;
 }
 
+/** Matches either an ungrouped digit string of any length, or one grouped at exactly every third
+ * digit from the right (standard thousands grouping, e.g. `"12,345,678"`). Comma-stripping alone
+ * can't tell a genuinely grouped number apart from malformed input that happens to leave a
+ * valid-looking digit string once commas are removed — `"1,2"` -> `"12"`, `"1,00"` -> `"100"`,
+ * `",1"` -> `"1"`, and `"1,,0"` -> `"10"` all round-trip cleanly despite none of them being a real
+ * grouped number. */
+const GROUPED_INTEGER_PATTERN = /^\d+$|^\d{1,3}(,\d{3})+$/;
+
+/** Shared by `parseNonNegativeInteger` and `parseReleasedQuantity`: parses a non-negative integer
+ * that is either ungrouped or validly thousands-grouped, returning `null` for anything else.
+ * Caller must pass an already-trimmed, non-empty string. */
+function parseGroupedNonNegativeInteger(trimmed: string): number | null {
+  if (!GROUPED_INTEGER_PATTERN.test(trimmed)) return null;
+
+  const withoutCommas = trimmed.replace(/,/g, "");
+  const parsed = Number.parseInt(withoutCommas, 10);
+  // The round-trip check rejects anything `Number.parseInt` only partially consumed (trailing
+  // characters, decimals, exponent notation) instead of silently truncating it to a different
+  // number. The grouping check above already rules out stray non-digit/non-comma characters, so
+  // this is now a defensive second layer rather than the only guard.
+  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== withoutCommas) return null;
+
+  return parsed;
+}
+
 export function parseNonNegativeInteger(value: string, { required }: { required: boolean }) {
   const trimmed = value.trim();
 
@@ -45,14 +70,7 @@ export function parseNonNegativeInteger(value: string, { required }: { required:
     return required ? null : 0;
   }
 
-  const withoutCommas = trimmed.replace(/,/g, "");
-  const parsed = Number.parseInt(withoutCommas, 10);
-  // The round-trip check rejects anything `Number.parseInt` only partially consumed (trailing
-  // characters, decimals, exponent notation) instead of silently truncating it to a different
-  // number — same guard `parseReleasedQuantity` below already relies on.
-  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== withoutCommas) return null;
-
-  return parsed;
+  return parseGroupedNonNegativeInteger(trimmed);
 }
 
 function toUtcNoonIso(year: number, month: number, day: number) {
@@ -317,11 +335,8 @@ export function parseReleasedQuantity(value: string): ParsedReleasedQuantity {
   const trimmed = value.trim();
   if (trimmed.length === 0) return { kind: "unknown" };
 
-  const withoutCommas = trimmed.replace(/,/g, "");
-  const parsed = Number.parseInt(withoutCommas, 10);
-  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== withoutCommas) {
-    return { kind: "invalid" };
-  }
+  const parsed = parseGroupedNonNegativeInteger(trimmed);
+  if (parsed === null) return { kind: "invalid" };
 
   return { kind: "value", value: parsed };
 }
