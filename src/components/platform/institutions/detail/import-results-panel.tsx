@@ -6,7 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { type CommitResponse, type PreviewResponse } from "@/lib/shipment-import-utils";
-import { computeImportProgressSummary, type YearProgress } from "@/hooks/use-shipment-import";
+import {
+  computeImportProgressSummary,
+  findImportingYear,
+  type YearProgress,
+} from "@/hooks/use-shipment-import";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -56,8 +60,8 @@ function YearStatusIcon({ status }: { status: YearProgress["status"] }) {
 }
 
 /**
- * Year-by-year import progress (Phase 5B) — renders the Phase 5A hook's `yearProgress`/
- * `yearRunningTotals` state. Never implies this runs as a background job: it reflects exactly
+ * Year-by-year import progress — renders the hook's `yearProgress`/`yearRunningTotals` state.
+ * Never implies this runs as a background job: it reflects exactly
  * what the client-side loop has observed so far, and the copy below is explicit that closing or
  * refreshing the page stops the sequence, and that re-validating and retrying (relying on
  * server-side existing-shipment skipping) is the supported recovery path — never a claim that a
@@ -74,7 +78,7 @@ function ImportProgressSection({
     computeImportProgressSummary(yearProgress);
 
   return (
-    <div className="space-y-3 rounded-md border p-4" aria-labelledby="import-progress-heading">
+    <section className="space-y-3 rounded-md border p-4" aria-labelledby="import-progress-heading">
       <div className="flex items-center justify-between">
         <p id="import-progress-heading" className="text-sm font-medium">
           Import Progress
@@ -132,7 +136,7 @@ function ImportProgressSection({
             : "Every year imported successfully."}
         </p>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -150,8 +154,25 @@ export default function ImportResultsPanel({
 }: ImportResultsPanelProps) {
   if (!preview && !commitSummary && !yearProgress) return null;
 
+  const importingYear = findImportingYear(yearProgress);
+
   return (
     <>
+      {/* Screen-reader-only: announces which year is currently importing. Rendered here —
+          unconditionally, as soon as this panel renders at all (i.e. as soon as a preview
+          exists, well before "Commit Import" is even clickable) — rather than inside
+          `ImportProgressSection` (which only mounts once `yearProgress` has entries). Mounting it
+          this early guarantees the browser has already painted it empty, as its own settled DOM
+          node, before the first year ever reaches "importing": `runYearByYearCommit` sets the
+          initial all-"pending" progress and the first year's "importing" status back to back
+          with no `await` between them, so React can (and in practice does) batch both into one
+          commit — if this element mounted only once `yearProgress` existed, its first real paint
+          would already show "Importing year `<N>`…", with no prior empty state for assistive
+          tech to diff against, so the very first announcement would be silently dropped. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {importingYear != null ? `Importing year ${importingYear}…` : ""}
+      </p>
+
       {/* Preview result panel */}
       {preview && (
         <div className="space-y-3 rounded-md border p-4">
@@ -207,9 +228,9 @@ export default function ImportResultsPanel({
         </div>
       )}
 
-      {/* Year-by-year progress (Phase 5B) — supersedes the old single-year commit summary;
-          `commitSummary` itself is still used elsewhere (import step indicator) but no longer
-          rendered directly here now that yearProgress carries the complete, per-year picture. */}
+      {/* Per-year progress and running totals render here via `yearProgress`/`yearRunningTotals`;
+          `commitSummary` below contributes only the run's aggregated warnings (its `created`/
+          `skipped` are not rendered directly — `yearRunningTotals` already covers that). */}
       {yearProgress && yearProgress.length > 0 && (
         <ImportProgressSection yearProgress={yearProgress} yearRunningTotals={yearRunningTotals} />
       )}

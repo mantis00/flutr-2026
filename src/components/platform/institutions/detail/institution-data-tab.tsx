@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/shared/date-picker";
@@ -125,6 +125,37 @@ export default function InstitutionDataTab({
     onImportSuccess: loadShipments,
   });
 
+  // Disabling the Commit Import button while it holds focus (its own `disabled={isImporting}`
+  // below) forces the browser to blur it to <body>, with no code path that ever restores focus —
+  // confirmed via a real keyboard/browser audit, not assumed. Restoring focus unconditionally on
+  // completion was tried first and also confirmed wrong by a real browser test: it steals focus
+  // back even after the user deliberately moved it elsewhere (e.g. to "Download Validation
+  // Report") during the run. The fix needs two things, not one: (1) whether the button genuinely
+  // had focus when the run *started* — captured synchronously in the click handler itself, before
+  // `handleCommitImport` disables the button, because the native blur-to-<body> happens as part
+  // of that same DOM mutation; reading `document.activeElement` from any effect (even a layout
+  // effect) would already be too late to see the button as focused. (2) whether anything has
+  // claimed focus *since* — checked only at completion, via `document.activeElement`. Restoring
+  // focus is correct only when both hold: the button had focus at the start, and focus is still
+  // sitting unclaimed on `<body>` at the end.
+  const commitButtonRef = useRef<HTMLButtonElement>(null);
+  const wasImportingRef = useRef(false);
+  const commitButtonHadFocusAtStartRef = useRef(false);
+  useEffect(() => {
+    if (wasImportingRef.current && !isImporting) {
+      if (commitButtonHadFocusAtStartRef.current && document.activeElement === document.body) {
+        commitButtonRef.current?.focus();
+      }
+      commitButtonHadFocusAtStartRef.current = false;
+    }
+    wasImportingRef.current = isImporting;
+  }, [isImporting]);
+
+  function handleCommitImportClick() {
+    commitButtonHadFocusAtStartRef.current = document.activeElement === commitButtonRef.current;
+    handleCommitImport();
+  }
+
   function handleDownloadValidationReport() {
     if (!preview) return;
     const csv = buildValidationReportCsv(preview.issues);
@@ -227,8 +258,9 @@ export default function InstitutionDataTab({
                 {isParsing ? "Parsing…" : "Parse Preview"}
               </Button>
               <Button
+                ref={commitButtonRef}
                 variant="outline"
-                onClick={handleCommitImport}
+                onClick={handleCommitImportClick}
                 disabled={isImporting || !canCommit || !tenantReady}
               >
                 {isImporting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
