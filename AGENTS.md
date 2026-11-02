@@ -36,6 +36,7 @@ src/
 │   │   ├── (tenant)/       # Protected tenant admin routes (sidebar + header + footer shell)
 │   │   │   ├── dashboard/  # Admin dashboard
 │   │   │   ├── butterflies/ # Per-institution species overrides (common name, lifespan)
+│   │   │   ├── guides/     # In-app user guides (index + FAQ, organization, shipments, releases, butterflies, news, import)
 │   │   │   ├── organization/ # Institution organization management
 │   │   │   └── shipments/  # Shipment list, detail (force-edit + release history), add, create release (shipments/[id]/release/new), edit release (shipments/[id]/release/[releaseId]/edit)
 │   │   └── (public)/       # Public-facing routes
@@ -56,6 +57,7 @@ src/
 │   │   ├── species/        # Platform species CRUD client, dialogs, table/cards, utilities
 │   │   └── suppliers/      # SuppliersTable, toolbar, row, utils
 │   ├── tenant/             # Tenant-facing feature components
+│   │   ├── guides/         # Guide page building blocks (GuideHeader, GuideSteps/GuideStep, GuideNote, GuideShot) + guide index items
 │   │   ├── species/        # Tenant species override client, edit dialog, table/cards, utilities
 │   │   ├── shipments/      # SpeciesPickerDialog, ShipmentItemsTable, ShipmentStatusBadge, SupplierSelect, types
 │   │   └── releases/       # ReleaseCategoryComposer, ReleaseEditComposer, ReleaseQuantityControls
@@ -96,6 +98,7 @@ src/
 docs/                       # Project documentation
 drizzle/                    # Generated database migrations
 public/docs/field-guide/    # Annotated screenshots shown in the organization info modals
+public/docs/guides/         # Annotated screenshots shown in the in-app user guides
 ```
 
 ## Commands
@@ -188,6 +191,7 @@ Detailed documentation lives in `docs/`:
 | Theme foreground            | `readableForeground`, `readableAccentOnDark`, `contrastRatio`, `relativeLuminance` from `@/lib/theme-color`                                                                                              | `readableForeground` picks a legible `--primary-foreground` for an institution's theme color by measured contrast; `[institution]/layout.tsx` applies both as CSS variables. `readableAccentOnDark` falls back to white for theme colors too dark to read on the hero                          |
 | Unsaved changes guard       | `useUnsavedChangesWarning(enabled)`, `confirmDiscardUnsavedChanges()` from `@/hooks/use-unsaved-changes-warning`                                                                                         | Pass `form.formState.isDirty`. Prompts on reload/close via `beforeunload` and on in-app link clicks via a capture-phase guard. Controls that swap content without navigating (tabs) call `confirmDiscardUnsavedChanges()` in their own change handler. Reset the form after a successful save  |
 | Section info modal          | `SectionHeading`, `InfoUse` from `@/components/platform/institutions/detail/section-info`                                                                                                                | Heading + "i" button that opens a modal explaining where a group of fields is used publicly. `InfoUse` takes `src`/`alt` for an annotated screenshot from `public/docs/field-guide/`                                                                                                           |
+| Guide pages                 | `GuideHeader`, `GuideSteps`, `GuideStep`, `GuideNote`, `GuideShot` from `@/components/tenant/guides/guide-step`; `GUIDE_ITEMS` from `@/components/tenant/guides/guide-items`                             | Building blocks for `/[institution]/guides`. Steps are a native `<ol>`; `GuideShot` lightboxes an annotated still from `public/docs/guides/`. Annotations are baked into the image, so repeat every label in the `caption` — a screen reader cannot read the picture                           |
 | Supplier select             | `SupplierSelect` from `@/components/tenant/shipments/supplier-select`                                                                                                                                    | Tenant-scoped supplier combobox used by the shipment add/edit forms                                                                                                                                                                                                                            |
 | Profile PATCH body          | `buildProfileUpdateBody` from `@/lib/institution-profile-body`                                                                                                                                           | Builds the organization profile update payload from React Hook Form's `dirtyFields`, so an untouched field can't overwrite a concurrent edit                                                                                                                                                   |
 | Shipment status badge       | `ShipmentStatusBadge` from `@/components/tenant/shipments/shipment-status-badge`                                                                                                                         | Standard pill rendering for "In flight" / "Completed" shipment status                                                                                                                                                                                                                          |
