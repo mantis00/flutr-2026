@@ -20,6 +20,7 @@ jest.mock("@/lib/tenant", () => ({
 
 jest.mock("@/lib/queries/shipments", () => ({
   createShipment: jest.fn(),
+  listExistingShipmentHeaders: jest.fn(),
   listShipmentExportRows: jest.fn(),
   shipmentHeaderExists: jest.fn(),
 }));
@@ -56,6 +57,7 @@ import {
 } from "@/lib/services/shipment-import";
 import {
   createShipment,
+  listExistingShipmentHeaders,
   listShipmentExportRows,
   shipmentHeaderExists,
 } from "@/lib/queries/shipments";
@@ -72,6 +74,7 @@ import { CANONICAL_SHIPMENT_IMPORT_HEADERS } from "@/lib/shipment-import-utils";
 const mockCreateShipment = createShipment as jest.Mock;
 const mockListShipmentExportRows = listShipmentExportRows as jest.Mock;
 const mockShipmentHeaderExists = shipmentHeaderExists as jest.Mock;
+const mockListExistingShipmentHeaders = listExistingShipmentHeaders as jest.Mock;
 const mockCreateSpecies = createSpecies as jest.Mock;
 const mockEnsureSpeciesLinksForInstitution = ensureSpeciesLinksForInstitution as jest.Mock;
 const mockListSpeciesGlobal = listSpeciesGlobal as jest.Mock;
@@ -131,6 +134,7 @@ describe("shipment import service", () => {
     jest.resetAllMocks();
     mockDbTransaction.mockImplementation(async (callback) => callback(FAKE_TX));
     mockTxExecute.mockResolvedValue([{ acquired: true }]);
+    mockListExistingShipmentHeaders.mockResolvedValue([]);
     // Authorization passthrough for `getPlatformShipmentImportPreview`'s tests below — these
     // tests exercise the real platform wrapper, not a mock of it, so its `assertPlatformImportAccess`
     // call needs a non-throwing auth/tenant chain. Unused by every other describe block in this
@@ -242,7 +246,6 @@ describe("shipment import service", () => {
     it("checks supplier existence against the global supplier list", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -264,7 +267,6 @@ describe("shipment import service", () => {
     it("preserves imported supplier casing and checks exact global code existence", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -305,7 +307,6 @@ describe("shipment import service", () => {
     it("blocks an unresolved species when allowSpeciesAutocreate is false, naming its real row number (manual QA finding 1 + 2)", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -329,7 +330,6 @@ describe("shipment import service", () => {
     it("does not block an unresolved species when allowSpeciesAutocreate is true", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -348,7 +348,6 @@ describe("shipment import service", () => {
     it("lists every contributing row number for a species unresolved across multiple rows/years (manual QA finding 2)", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -368,7 +367,13 @@ describe("shipment import service", () => {
     it("reports an existing shipment as a non-blocking notice, not a validation error", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(true);
+      mockListExistingShipmentHeaders.mockResolvedValueOnce([
+        {
+          supplierCode: "EBN",
+          shipmentDate: new Date("2025-12-09T12:00:00.000Z"),
+          arrivalDate: new Date("2025-12-11T12:00:00.000Z"),
+        },
+      ]);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -384,10 +389,31 @@ describe("shipment import service", () => {
       expect(preview.existing_shipments).toEqual(["EBN (2025-12-09 -> 2025-12-11)"]);
     });
 
+    it("checks existing-shipment headers with a single batched query, regardless of how many shipments are in the workbook", async () => {
+      mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
+      mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
+
+      const manyShipmentRows = Array.from(
+        { length: 25 },
+        (_, index) =>
+          `Caligo atreus,Owl Butterfly,10,EBN,1/${(index % 27) + 1}/24,1/${(index % 27) + 2}/24,0,0,0,0,0,0,9`,
+      );
+
+      await buildShipmentImportPreviewForInstitution({
+        institutionId: 1,
+        raw_text: [STRICT_HEADER_ROW, ...manyShipmentRows].join("\n"),
+        source: { kind: "paste" },
+        allowSpeciesAutocreate: false,
+      });
+
+      // One query for the whole preview, not one per candidate shipment.
+      expect(mockListExistingShipmentHeaders).toHaveBeenCalledTimes(1);
+      expect(mockListExistingShipmentHeaders).toHaveBeenCalledWith(1);
+    });
+
     it("returns sorted, distinct Arrival years across the valid shipments", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -406,7 +432,6 @@ describe("shipment import service", () => {
     it("does not write anything during preview", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       await buildShipmentImportPreviewForInstitution({
         institutionId: 1,
@@ -426,7 +451,6 @@ describe("shipment import service", () => {
     it("computes preview_hash as a function of raw_text (Phase 3C: the single hash concept)", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([{ id: 1, scientificName: "Caligo atreus" }]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const rawText = buildRawText(validDataRow());
 
@@ -449,7 +473,6 @@ describe("shipment import service", () => {
     it("defaults to blocking an unresolved species when allow_species_autocreate is omitted from the request — matching commit's own default", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await getPlatformShipmentImportPreview({
         institutionId: 1,
@@ -469,7 +492,6 @@ describe("shipment import service", () => {
     it("does not block an unresolved species when the request explicitly sets allow_species_autocreate: true", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await getPlatformShipmentImportPreview({
         institutionId: 1,
@@ -488,7 +510,6 @@ describe("shipment import service", () => {
     it("blocks an unresolved species when the request explicitly sets allow_species_autocreate: false — reproduces the manual QA 2004 scenario", async () => {
       mockListSpeciesGlobal.mockResolvedValueOnce([]);
       mockListSuppliersGlobal.mockResolvedValueOnce([{ id: 10, code: "EBN" }]);
-      mockShipmentHeaderExists.mockResolvedValue(false);
 
       const preview = await getPlatformShipmentImportPreview({
         institutionId: 1,

@@ -309,6 +309,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
   let institutionA: number;
   let institutionB: number;
   let institutionC: number;
+  let institutionD: number;
 
   beforeAll(async () => {
     if (!IS_IMPORT_TEST_DATABASE) {
@@ -325,6 +326,7 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
     institutionA = await createTestInstitution("a-success-skip-retry");
     institutionB = await createTestInstitution("b-rollback-preservation-lock");
     institutionC = await createTestInstitution("c-concurrency-independent");
+    institutionD = await createTestInstitution("d-species-race");
 
     // Pre-existing species for scenario A, confirming the importer correctly resolves an
     // ALREADY-catalogued species (not every species in this suite needs auto-create).
@@ -841,6 +843,134 @@ describeIntegration("shipment import commit — real PostgreSQL integration (Pha
       });
 
       expect(result).toEqual({ year: 2010, created: 0, skipped: 1, warnings: [] });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Scenario F: cross-institution species-creation race (real unique-violation rollback)
+  // -------------------------------------------------------------------------
+
+  describe("Scenario F: cross-institution species-creation race", () => {
+    it("one commit succeeds, the other rolls back its entire year on a real unique-violation race, and a retry then succeeds", async () => {
+      const raceSpeciesName = "Zzz Phase3d Species RaceCondition";
+
+      const rawTextFor = (supplier: string) =>
+        buildRawText([
+          buildRow({
+            species: raceSpeciesName,
+            numberReceived: 4,
+            supplier,
+            shipDate: "2045-01-01",
+            arrivalDate: "2045-01-05",
+          }),
+        ]);
+
+      const rawTextA = rawTextFor("ZZPH3DRACEA");
+      const rawTextD = rawTextFor("ZZPH3DRACED");
+
+      const [previewA, previewD] = await Promise.all([
+        buildShipmentImportPreviewForInstitution({
+          institutionId: institutionA,
+          raw_text: rawTextA,
+          source: { kind: "paste" },
+          allowSpeciesAutocreate: true,
+        }),
+        buildShipmentImportPreviewForInstitution({
+          institutionId: institutionD,
+          raw_text: rawTextD,
+          source: { kind: "paste" },
+          allowSpeciesAutocreate: true,
+        }),
+      ]);
+      expect(previewA.issues).toEqual([]);
+      expect(previewD.issues).toEqual([]);
+
+      // Both institutions independently resolved the species as unknown-but-auto-creatable from
+      // the same pre-commit catalog snapshot — neither has created it yet. Committing both at the
+      // same time races their `createSpecies` inserts against the real database's unique
+      // constraint on `scientific_name`, exactly as two unrelated institutions' historical
+      // imports could in production.
+      const results = await Promise.allSettled([
+        commitShipmentImportForInstitution({
+          institutionId: institutionA,
+          raw_text: rawTextA,
+          preview_hash: previewA.preview_hash,
+          year: 2045,
+          options: { allow_species_autocreate: true },
+        }),
+        commitShipmentImportForInstitution({
+          institutionId: institutionD,
+          raw_text: rawTextD,
+          preview_hash: previewD.preview_hash,
+          year: 2045,
+          options: { allow_species_autocreate: true },
+        }),
+      ]);
+
+      const [resultA] = results;
+      const fulfilledCount = results.filter((r) => r.status === "fulfilled").length;
+      const rejectedCount = results.filter((r) => r.status === "rejected").length;
+
+      // Exactly one side wins the race and creates the species; the other's unique violation
+      // rolls its whole year back cleanly instead of silently "recovering" into a transaction
+      // that is actually already aborted.
+      expect(fulfilledCount).toBe(1);
+      expect(rejectedCount).toBe(1);
+
+      // The catalog ends up with exactly one row for this species — never two, never zero.
+      // Auto-created species are stored lowercase (normalizeScientificName), same convention as
+      // the other auto-created species fixtures in this file.
+      const speciesRows = await db
+        .select({ id: butterfly_species.id })
+        .from(butterfly_species)
+        .where(eq(butterfly_species.scientific_name, raceSpeciesName.toLowerCase()));
+      expect(speciesRows).toHaveLength(1);
+
+      const [institutionAShipments, institutionDShipments] = await Promise.all([
+        shipmentsForYear(institutionA, 2045),
+        shipmentsForYear(institutionD, 2045),
+      ]);
+
+      const institutionALost = resultA.status === "rejected";
+      const loserInstitutionId = institutionALost ? institutionA : institutionD;
+      const loserShipments = institutionALost ? institutionAShipments : institutionDShipments;
+      const winnerShipments = institutionALost ? institutionDShipments : institutionAShipments;
+
+      // The loser has ZERO shipments for this year — a clean, full rollback, not a shipment left
+      // behind with no resolvable species.
+      expect(loserShipments).toHaveLength(0);
+      expect(winnerShipments).toHaveLength(1);
+
+      // Retry the loser: its own fresh catalog fetch (at the top of the next commit call) now
+      // finds the species the winner already created, so it resolves via the normal lookup — no
+      // second createSpecies attempt, no special recovery path, just an ordinary successful year.
+      const loserRawText = institutionALost ? rawTextA : rawTextD;
+      const loserPreview = await buildShipmentImportPreviewForInstitution({
+        institutionId: loserInstitutionId,
+        raw_text: loserRawText,
+        source: { kind: "paste" },
+        allowSpeciesAutocreate: true,
+      });
+      expect(loserPreview.issues).toEqual([]);
+
+      const retryResult = await commitShipmentImportForInstitution({
+        institutionId: loserInstitutionId,
+        raw_text: loserRawText,
+        preview_hash: loserPreview.preview_hash,
+        year: 2045,
+        options: { allow_species_autocreate: true },
+      });
+
+      // created: 1, skipped: 0 either way. Warnings may still include the loser's own supplier
+      // auto-create notice (rolled back along with everything else in its failed year), but never
+      // a second "species auto-created" warning — the species itself resolves via the normal
+      // lookup this time, since the winner's commit already created it.
+      expect(retryResult.year).toBe(2045);
+      expect(retryResult.created).toBe(1);
+      expect(retryResult.skipped).toBe(0);
+      expect(retryResult.warnings.some((w) => w.includes("was auto-created in master list"))).toBe(
+        false,
+      );
     });
   });
 });

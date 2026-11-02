@@ -6,6 +6,7 @@ import { canCrossTenant, requireUser } from "@/lib/authz";
 import { db } from "@/lib/db";
 import {
   createShipment,
+  listExistingShipmentHeaders,
   listShipmentExportRows,
   shipmentHeaderExists,
 } from "@/lib/queries/shipments";
@@ -35,9 +36,9 @@ import {
 /**
  * Thrown by `commitShipmentImportForInstitution` when the full, fresh re-validation of the
  * entire submitted workbook finds any blocking issue (header, row, group, or unresolved-species)
- * — per Phase 3A's resolved architecture, this is re-derived from `raw_text` on every request,
- * never trusted from an earlier validate/preview call. Carries the structured issues so the
- * route can surface them the same way preview does.
+ * — always re-derived from `raw_text` on every request, never trusted from an earlier
+ * validate/preview call. Carries the structured issues so the route can surface them the same
+ * way preview does.
  */
 export class ShipmentImportValidationError extends Error {
   issues: ShipmentImportIssue[];
@@ -51,16 +52,15 @@ export class ShipmentImportValidationError extends Error {
 
 /** One advisory-lock namespace shared by every acquire/check call — must stay the single
  * constant used everywhere a lock is taken, or the mechanism silently fails to serialize
- * anything (flagged explicitly in the plan's "Risks and unresolved questions"). */
+ * anything. */
 const SHIPMENT_IMPORT_LOCK_NAMESPACE = "shipment_import";
 
 type ShipmentExportRow = Awaited<ReturnType<typeof listShipmentExportRows>>[number];
 
 /** The exporter's header row — sourced from the single canonical-header constant (also used by
- * strict header validation and the blank template) so the two can never drift apart. Hardening
- * checkpoint: `Released` (the 13th header) was previously missing here entirely — confirmed by
- * direct code reading in the pre-release review, not assumed — meaning a real export could not be
- * re-imported by the strict importer, which requires all 13 canonical headers. */
+ * strict header validation and the blank template) so the two can never drift apart. Must
+ * include `Released` (the 13th header): an export missing it could not be re-imported by the
+ * strict importer, which requires all 13 canonical headers. */
 const SHIPMENT_EXPORT_HEADERS = CANONICAL_SHIPMENT_IMPORT_HEADERS;
 
 function buildUnknownSpeciesPayload(scientificName: string) {
@@ -80,11 +80,17 @@ function formatShipmentLabel(shipment: StrictShipmentImportDraft) {
   return `${shipment.supplier_code} (${shipmentDate} -> ${arrivalDate})`;
 }
 
+/** Composite key matching exactly what `shipmentHeaderExists` compares on, so a batched existing-
+ * header lookup and a per-draft check agree on what counts as "the same shipment header." */
+function buildShipmentHeaderKey(supplierCode: string, shipmentDate: Date, arrivalDate: Date) {
+  return `${supplierCode}|${shipmentDate.toISOString()}|${arrivalDate.toISOString()}`;
+}
+
 /**
  * One pass over every parsed row, building a species -> contributing-row-numbers lookup —
  * reused for every unresolved species in one request instead of re-scanning all rows once per
- * unknown species (manual QA finding 2). Shared by both preview and commit, which otherwise
- * build near-identical unresolved-species issues independently.
+ * unknown species. Shared by both preview and commit, which otherwise build near-identical
+ * unresolved-species issues independently.
  */
 function buildRowNumbersBySpecies(rows: StrictParsedShipmentImportRow[]): Map<string, number[]> {
   const rowNumbersBySpecies = new Map<string, number[]>();
@@ -101,10 +107,9 @@ function buildRowNumbersBySpecies(rows: StrictParsedShipmentImportRow[]): Map<st
 
 /**
  * Builds the blocking "unresolved species" issues shared by preview and commit — a species not
- * in the catalog, and not legally auto-creatable for this request, blocks every year (review
- * section 11a). `rowNumbers` names every original row the species appears in (manual QA finding
- * 2), looked up from the shared `rowNumbersBySpecies` map rather than re-scanning `parsed.rows`
- * per species.
+ * in the catalog, and not legally auto-creatable for this request, blocks every year. `rowNumbers`
+ * names every original row the species appears in, looked up from the shared
+ * `rowNumbersBySpecies` map rather than re-scanning `parsed.rows` per species.
  */
 function buildUnresolvedSpeciesIssues(
   unknownSpecies: string[],
@@ -123,11 +128,10 @@ function buildUnresolvedSpeciesIssues(
 }
 
 /**
- * Hash scoped to the raw workbook text itself (Phase 3A's resolved validation-integrity
- * architecture) — the single hash concept used by both validate/preview and the year-scoped
- * commit endpoint (Phase 3C). A same-input workflow-integrity check, not a security/approval
- * mechanism: the commit endpoint always re-derives and re-validates everything from `raw_text`
- * itself, independent of whether this hash matches.
+ * Hash scoped to the raw workbook text itself — the single hash concept used by both
+ * validate/preview and the year-scoped commit endpoint. A same-input workflow-integrity check,
+ * not a security/approval mechanism: the commit endpoint always re-derives and re-validates
+ * everything from `raw_text` itself, independent of whether this hash matches.
  */
 function buildPreviewHash(institutionId: number, rawText: string) {
   const hashSource = JSON.stringify({
@@ -136,15 +140,6 @@ function buildPreviewHash(institutionId: number, rawText: string) {
   });
 
   return `sha256:${createHash("sha256").update(hashSource).digest("hex")}`;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    (error as { code: unknown }).code === "23505"
-  );
 }
 
 function mapRowToExportRecord(row: ShipmentExportRow) {
@@ -193,14 +188,12 @@ export async function getPlatformShipmentImportPreview({
   institutionId: number;
 }): Promise<ShipmentImportPreviewResponse> {
   await assertPlatformImportAccess(institutionId);
-  // Manual QA finding 1 fix: a platform (SUPERUSER) request's unresolved-species blocking
-  // decision must follow the *actual* `allow_species_autocreate` intent for this request, not a
-  // static "this role is permitted to use auto-create" eligibility flag — the latter let preview
-  // report zero errors for a workbook that a same-toggle-state commit would then correctly
-  // reject, since commit always decides this from the real submitted option
-  // (`commitShipmentImportForInstitution`'s `allowSpeciesAutocreate`, derived from
-  // `options?.allow_species_autocreate ?? false`). Omitting the field defaults to `false` here
-  // too, so a preview and a commit that both omit it always agree.
+  // A platform (SUPERUSER) request's unresolved-species blocking decision must follow the
+  // *actual* `allow_species_autocreate` intent for this request, not a static "this role is
+  // permitted to use auto-create" eligibility flag — the latter would let preview report zero
+  // errors for a workbook that a same-toggle-state commit would then correctly reject, since
+  // commit always decides this from the real submitted option. Omitting the field defaults to
+  // `false` here too, so a preview and a commit that both omit it always agree.
   return buildShipmentImportPreviewForInstitution({
     institutionId,
     raw_text,
@@ -215,7 +208,7 @@ export async function buildShipmentImportPreviewForInstitution({
   allowSpeciesAutocreate,
 }: ShipmentImportPreviewRequest & {
   institutionId: number;
-  /** The actual, per-request intent — never a role-eligibility proxy (manual QA finding 1). A
+  /** The actual, per-request intent — never a role-eligibility proxy. A
    * tenant request force-passes `false` unconditionally (it can never legally auto-create a
    * species); a platform request passes through its own submitted `allow_species_autocreate`
    * (defaulted to `false` when omitted). `false` promotes every unresolved species to a blocking
@@ -251,11 +244,10 @@ export async function buildShipmentImportPreviewForInstitution({
     ),
   ).sort();
 
-  // Reclassification (review section 11a): when auto-create won't actually be used for this
-  // request, every unresolved name is promoted from an informational notice into the same
-  // blocking `issues`/`row_errors` collection as every other validation problem — surfaced
-  // during full-workbook validation, not discovered for the first time at commit. `rowNumbers`
-  // names every original row the species appears in (manual QA finding 2).
+  // When auto-create won't actually be used for this request, every unresolved name is promoted
+  // from an informational notice into the same blocking `issues`/`row_errors` collection as every
+  // other validation problem — surfaced during full-workbook validation, not discovered for the
+  // first time at commit. `rowNumbers` names every original row the species appears in.
   const rowNumbersBySpecies = buildRowNumbersBySpecies(parsed.rows);
   const speciesIssues = buildUnresolvedSpeciesIssues(
     unknownSpecies,
@@ -266,25 +258,31 @@ export async function buildShipmentImportPreviewForInstitution({
   const issues: ShipmentImportIssue[] = [...parsed.issues, ...grouped.issues, ...speciesIssues];
   const rowErrors = issues.map(formatShipmentImportIssue);
 
-  // Existing-shipment-header check moved here from commit-only (version 2 design) — a
-  // non-blocking notice of what would be skipped by default, visible before any commit attempt.
-  // One query per shipment for now (correct, matches the existing function's signature from
-  // Phase 2); batching into a single query is a noted, deferred performance optimization (review
-  // section 14.3), not required for this phase's correctness.
-  const existingShipmentChecks = await Promise.all(
-    grouped.drafts.map(async (draft) => {
-      const exists = await shipmentHeaderExists(
-        institutionId,
-        draft.supplier_code,
-        new Date(draft.shipment_date),
-        new Date(draft.arrival_date),
-      );
-      return exists ? formatShipmentLabel(draft) : null;
-    }),
+  // Existing-shipment-header check: a non-blocking notice of what would be skipped by default,
+  // visible before any commit attempt. One query fetches every existing header for the
+  // institution once, then every draft is matched against it in memory — avoids a separate round
+  // trip per candidate shipment (a full historical workbook can have well over a thousand).
+  const existingShipmentHeaders = await listExistingShipmentHeaders(institutionId);
+  const existingShipmentKeys = new Set(
+    existingShipmentHeaders.map((header) =>
+      buildShipmentHeaderKey(
+        normalizeSupplierCode(header.supplierCode),
+        header.shipmentDate,
+        header.arrivalDate,
+      ),
+    ),
   );
-  const existingShipments = existingShipmentChecks.filter(
-    (label): label is string => label !== null,
-  );
+  const existingShipments = grouped.drafts
+    .filter((draft) =>
+      existingShipmentKeys.has(
+        buildShipmentHeaderKey(
+          normalizeSupplierCode(draft.supplier_code),
+          new Date(draft.shipment_date),
+          new Date(draft.arrival_date),
+        ),
+      ),
+    )
+    .map((draft) => formatShipmentLabel(draft));
 
   const years = Array.from(
     new Set(grouped.drafts.map((draft) => extractYear(draft.arrival_date))),
@@ -330,7 +328,7 @@ export async function commitPlatformShipmentImport({
 }
 
 /**
- * Year-scoped atomic commit (Phase 3C). Never trusts a client-supplied shipments structure or a
+ * Year-scoped atomic commit. Never trusts a client-supplied shipments structure or a
  * hash as evidence of prior validation — re-derives and re-validates the *entire* workbook from
  * `raw_text` on every call, rejects the whole request if any blocking issue exists anywhere (not
  * only in the requested year), and only then opens one transaction scoped to the requested
@@ -376,12 +374,11 @@ export async function commitShipmentImportForInstitution({
     ),
   );
 
-  // Same reclassification rule as preview (review section 11a), driven by the actual requested
+  // Same reclassification rule as preview, driven by the actual requested
   // `options.allow_species_autocreate` — the tenant wrapper (`commitTenantShipmentImport`)
-  // force-overrides this to `false` before reaching here, exactly as it already did before this
-  // phase, so a tenant request can never legally bypass this check regardless of what its own
-  // request body asked for. `rowNumbers` names every original row the species appears in (manual
-  // QA finding 2), via the same shared lookup preview uses.
+  // force-overrides this to `false` before reaching here, so a tenant request can never legally
+  // bypass this check regardless of what its own request body asked for. `rowNumbers` names every
+  // original row the species appears in, via the same shared lookup preview uses.
   const rowNumbersBySpecies = buildRowNumbersBySpecies(parsed.rows);
   const speciesIssues = buildUnresolvedSpeciesIssues(
     unknownSpecies,
@@ -390,7 +387,7 @@ export async function commitShipmentImportForInstitution({
   );
 
   // No shipment in ANY year commits while any blocking issue exists anywhere in the workbook —
-  // the governing whole-workbook invariant (review section 14.2's final paragraph).
+  // the governing whole-workbook invariant.
   const issues: ShipmentImportIssue[] = [...parsed.issues, ...grouped.issues, ...speciesIssues];
   if (issues.length > 0) {
     throw new ShipmentImportValidationError(issues);
@@ -478,28 +475,21 @@ export async function commitShipmentImportForInstitution({
         let speciesId = speciesLookup.get(normalizedScientificName);
 
         if (!speciesId && allowSpeciesAutocreate) {
-          try {
-            const createdSpecies = await createSpecies(
-              buildUnknownSpeciesPayload(normalizedScientificName),
-              tx,
-            );
-            speciesId = createdSpecies.id;
-            speciesLookup.set(normalizedScientificName, speciesId);
-            warnings.push(`Species ${normalizedScientificName} was auto-created in master list.`);
-          } catch (error) {
-            if (isUniqueViolation(error)) {
-              // Race against a concurrent import for a *different* institution creating the
-              // same global species — the per-institution advisory lock does not (and is not
-              // meant to) prevent this; re-select and continue.
-              const refreshedSpeciesRows = await listSpeciesGlobal();
-              for (const species of refreshedSpeciesRows) {
-                speciesLookup.set(normalizeScientificName(species.scientificName), species.id);
-              }
-              speciesId = speciesLookup.get(normalizedScientificName);
-            } else {
-              throw error;
-            }
-          }
+          // No try/catch: a unique violation here means a concurrent import for a *different*
+          // institution just created this same global species name (the per-institution advisory
+          // lock does not, and is not meant to, prevent this cross-institution race). PostgreSQL
+          // aborts the whole transaction on any failed statement, so any "recover and continue on
+          // `tx`" attempt would itself fail on the very next write — letting the error propagate
+          // and roll back this year, exactly like any other unexpected failure in this loop, is
+          // the only outcome available. The client's retry re-reads the species catalog fresh, so
+          // a retry resolves the now-existing species normally with no special handling needed.
+          const createdSpecies = await createSpecies(
+            buildUnknownSpeciesPayload(normalizedScientificName),
+            tx,
+          );
+          speciesId = createdSpecies.id;
+          speciesLookup.set(normalizedScientificName, speciesId);
+          warnings.push(`Species ${normalizedScientificName} was auto-created in master list.`);
         }
 
         // Every species referenced anywhere in the workbook already caused a blocking
@@ -526,8 +516,7 @@ export async function commitShipmentImportForInstitution({
 
       // No try/catch here: any failure (a thrown error from createShipment, a DB constraint
       // violation, the defensive guard above, etc.) propagates out of this transaction callback,
-      // rolling back every write this call has made so far — there is no partial-success state,
-      // unlike the retired per-shipment-resilient legacy loop.
+      // rolling back every write this call has made so far — there is no partial-success state.
       await createShipment(
         institutionId,
         {

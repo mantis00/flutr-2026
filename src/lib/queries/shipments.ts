@@ -18,11 +18,12 @@ import type { CreateShipmentBody, UpdateShipmentBody } from "@/lib/validation/sh
  * `createShipment()`'s own payload type — intentionally wider than the public, Zod-validated
  * `CreateShipmentBody` it's otherwise identical to. `good_emergence` is deliberately NOT part of
  * `CreateShipmentBody`/`shipmentItemCreateSchema` (the manual create/add-item routes' public
- * input schema): widening that public schema once let any tenant user with ordinary
- * shipment-create permission set Released directly through the API (see the Phase 3A/3B security
- * review). Only a trusted internal caller — the historical importer, which validates its own
- * input through the separate `shipmentImportDraftItemSchema` — should ever supply this field;
- * the manual-create route never does, so its payloads are unaffected by this widening.
+ * input schema): widening that public schema would let any tenant user with ordinary
+ * shipment-create permission set Released directly through the API. Only a trusted internal
+ * caller — the historical importer, which validates its own input via
+ * `parseShipmentImportRowsStrict` and the service layer's own full-workbook re-validation —
+ * should ever supply this field; the manual-create route never does, so its payloads are
+ * unaffected by this widening.
  */
 export type CreateShipmentPayload = Omit<CreateShipmentBody, "items"> & {
   items: (CreateShipmentBody["items"][number] & { good_emergence?: number | null })[];
@@ -359,6 +360,26 @@ export async function shipmentHeaderExists(
     .limit(1);
 
   return !!row;
+}
+
+/**
+ * Every existing shipment header for an institution, as the raw columns `shipmentHeaderExists`
+ * matches on. Used to check many candidate headers against the database in one query instead of
+ * one round trip per candidate (the importer's full-workbook preview can have over a thousand
+ * candidates for a single historical workbook).
+ */
+export async function listExistingShipmentHeaders(
+  institutionId: number,
+  executor: DbExecutor = db,
+) {
+  return executor
+    .select({
+      supplierCode: shipments.supplier_code,
+      shipmentDate: shipments.shipment_date,
+      arrivalDate: shipments.arrival_date,
+    })
+    .from(shipments)
+    .where(eq(shipments.institution_id, institutionId));
 }
 
 /**

@@ -22,6 +22,7 @@ import {
 import {
   createShipment,
   deleteShipment,
+  listExistingShipmentHeaders,
   listShipmentExportRows,
   SHIPMENT_ERRORS,
   shipmentHeaderExists,
@@ -519,6 +520,36 @@ describe("shipment queries", () => {
       );
 
       expect(exists).toBe(false);
+      expect(txSelect).toHaveBeenCalledTimes(1);
+      expect(mockSelect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("listExistingShipmentHeaders", () => {
+    it("fetches every existing header for an institution in one query, using the plain db client by default", async () => {
+      const rows = [
+        {
+          supplierCode: "LPS",
+          shipmentDate: new Date("2026-06-10T00:00:00.000Z"),
+          arrivalDate: new Date("2026-06-11T00:00:00.000Z"),
+        },
+      ];
+      mockSelect.mockReturnValueOnce(createThenableQuery(rows));
+
+      const result = await listExistingShipmentHeaders(77);
+
+      expect(result).toEqual(rows);
+      expect(mockSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it("uses a supplied executor instead of the plain db client", async () => {
+      const txSelect = jest.fn(() => createThenableQuery([]));
+
+      const result = await listExistingShipmentHeaders(77, {
+        select: txSelect,
+      } as unknown as Parameters<typeof listExistingShipmentHeaders>[1]);
+
+      expect(result).toEqual([]);
       expect(txSelect).toHaveBeenCalledTimes(1);
       expect(mockSelect).not.toHaveBeenCalled();
     });
