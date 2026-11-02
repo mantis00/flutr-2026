@@ -190,20 +190,28 @@ export default function ImportResultsPanel({
           )}
 
           {preview.warnings.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Warnings</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
-                {preview.warnings.slice(0, 20).map((warning, index) => (
+            // A native <details>/<summary> disclosure, not a custom toggle: fully keyboard-
+            // operable (Enter/Space) and exposes its own expanded/collapsed state to assistive
+            // tech for free, with no extra ARIA wiring needed. Renders every warning, never a
+            // sliced subset — the count in the summary is the real count, not an estimate.
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+                Warnings ({preview.warnings.length})
+              </summary>
+              <ul className="list-disc space-y-1 pt-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
+                {preview.warnings.map((warning, index) => (
                   <li key={`preview-warning-${index}-${warning}`}>{warning}</li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
 
           {preview.unknown_species.length > 0 && (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Unknown Species</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Unknown Species
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
                 {preview.unknown_species.slice(0, 20).map((name, index) => (
                   <li key={`unknown-species-${index}-${name}`}>{name}</li>
                 ))}
@@ -213,8 +221,10 @@ export default function ImportResultsPanel({
 
           {preview.unknown_suppliers.length > 0 && (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Unknown Suppliers</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Unknown Suppliers
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
                 {preview.unknown_suppliers.slice(0, 20).map((code, index) => (
                   <li key={`unknown-supplier-${index}-${code}`}>{code}</li>
                 ))}
@@ -236,14 +246,19 @@ export default function ImportResultsPanel({
       )}
 
       {commitSummary && commitSummary.warnings.length > 0 && (
-        <div className="space-y-1 rounded-md border p-4">
-          <p className="text-sm font-medium text-amber-700">Import Warnings</p>
-          <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
-            {commitSummary.warnings.slice(0, 20).map((warning, index) => (
+        // Same native disclosure pattern as the preview warnings above — these are the only
+        // record of which global species/suppliers an import auto-created, so every one of them
+        // must stay reachable, never silently capped.
+        <details className="space-y-1 rounded-md border p-4">
+          <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+            Import Warnings ({commitSummary.warnings.length})
+          </summary>
+          <ul className="list-disc space-y-1 pt-2 pl-5 text-xs text-amber-900 dark:text-amber-100">
+            {commitSummary.warnings.map((warning, index) => (
               <li key={`commit-warning-${index}-${warning}`}>{warning}</li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
 
       {(commitSummary || (yearProgress && yearProgress.length > 0)) && (

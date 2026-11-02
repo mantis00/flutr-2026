@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * In-app Import & Export guide content (Phase 5B) — explains the historical shipment import
+ * In-app Import & Export guide content — explains the historical shipment import
  * contract in plain language for institution staff. Deliberately avoids implementation terms
  * (Zod, Drizzle, advisory locks, raw-text hashes) — those are correct but meaningless to the
  * audience this guide is for. Kept as plain data (not JSX) so a test can check its content stays

@@ -126,12 +126,11 @@ export default function InstitutionDataTab({
   });
 
   // Disabling the Commit Import button while it holds focus (its own `disabled={isImporting}`
-  // below) forces the browser to blur it to <body>, with no code path that ever restores focus —
-  // confirmed via a real keyboard/browser audit, not assumed. Restoring focus unconditionally on
-  // completion was tried first and also confirmed wrong by a real browser test: it steals focus
-  // back even after the user deliberately moved it elsewhere (e.g. to "Download Validation
-  // Report") during the run. The fix needs two things, not one: (1) whether the button genuinely
-  // had focus when the run *started* — captured synchronously in the click handler itself, before
+  // below) forces the browser to blur it to <body>, with no code path that otherwise restores
+  // focus. Restoring unconditionally on completion is wrong: it would steal focus back even after
+  // the user deliberately moved it elsewhere (e.g. to "Download Validation Report") during the
+  // run. Correct restoration needs two facts, not one: (1) whether the button genuinely had focus
+  // when the run *started* — captured synchronously in the click handler itself, before
   // `handleCommitImport` disables the button, because the native blur-to-<body> happens as part
   // of that same DOM mutation; reading `document.activeElement` from any effect (even a layout
   // effect) would already be too late to see the button as focused. (2) whether anything has

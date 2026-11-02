@@ -258,10 +258,11 @@ export async function buildShipmentImportPreviewForInstitution({
   const issues: ShipmentImportIssue[] = [...parsed.issues, ...grouped.issues, ...speciesIssues];
   const rowErrors = issues.map(formatShipmentImportIssue);
 
-  // Existing-shipment-header check: a non-blocking notice of what would be skipped by default,
-  // visible before any commit attempt. One query fetches every existing header for the
-  // institution once, then every draft is matched against it in memory — avoids a separate round
-  // trip per candidate shipment (a full historical workbook can have well over a thousand).
+  // Existing-shipment-header check: a non-blocking notice of what would be skipped by default on
+  // commit, not a validation error. Carried in the response for API consumers; the current UI
+  // does not render it. One query fetches every existing header for the institution once, then
+  // every draft is matched against it in memory — avoids a separate round trip per candidate
+  // shipment (a full historical workbook can have well over a thousand).
   const existingShipmentHeaders = await listExistingShipmentHeaders(institutionId);
   const existingShipmentKeys = new Set(
     existingShipmentHeaders.map((header) =>

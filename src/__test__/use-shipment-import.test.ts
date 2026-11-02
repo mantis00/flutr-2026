@@ -360,6 +360,27 @@ describe("runYearByYearCommit", () => {
     expect(sumYearProgressTotals(result.progress)).toEqual({ created: 3, skipped: 1 });
   });
 
+  it("carries more than 20 warnings through aggregation untruncated (regression for the import-results-panel render cap this fed)", async () => {
+    // The real 2002-2025 historical import generated 19 species + 5 supplier warnings = 24 —
+    // more than the UI's old fixed slice(0, 20). Nothing in this aggregation layer may itself cap
+    // the count; truncation, if any, must only ever happen (or not happen, after the fix) at the
+    // render layer, never here.
+    const years = Array.from({ length: 24 }, (_, i) => 2002 + i);
+    const runCommit = jest.fn(async (body) => commitOf(body.year, 1, 0, [`warning-${body.year}`]));
+
+    const result = await runYearByYearCommit({
+      years,
+      rawText: "raw",
+      previewHash: "sha256:abc",
+      options: OPTIONS,
+      runCommit,
+      onProgress: () => {},
+    });
+
+    expect(result.warnings).toHaveLength(24);
+    expect(result.warnings).toEqual(years.map((year) => `warning-${year}`));
+  });
+
   it("stops collecting warnings from a year that never completes — a failed year's own warnings are not included", async () => {
     const runCommit = jest.fn(async (body) => {
       if (body.year === 2010) throw new Error("accounting bound violated");
