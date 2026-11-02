@@ -3,6 +3,7 @@ import {
   formatShipmentImportIssue,
   groupShipmentImportRowsStrict,
   parseExcelDateToIso,
+  parseNonNegativeInteger,
   parseReleasedQuantity,
   parseShipmentImportRowsStrict,
   POSTGRES_INTEGER_MAX,
@@ -404,15 +405,78 @@ describe("shipment-import-parser", () => {
         "Released must be a non-negative integer or blank",
       );
 
-      // parseReleasedQuantity (unlike No. rec's parseNonNegativeInteger) explicitly rejects a
-      // fractional value rather than silently truncating it — confirmed pre-existing, unrelated
-      // to this hardening checkpoint; exercised here only to confirm it still holds.
       const fractionalReleased = parseShipmentImportRowsStrict(
         [VALID_HEADER_ROW, buildStrictRow({ released: "1.5" })].join("\n"),
       );
       expect(fractionalReleased.rowErrors[0]).toContain(
         "Released must be a non-negative integer or blank",
       );
+    });
+
+    describe("parseNonNegativeInteger (direct unit tests)", () => {
+      it("rejects a digit-prefixed value instead of silently truncating it", () => {
+        expect(parseNonNegativeInteger("10abc", { required: true })).toBeNull();
+      });
+
+      it("rejects a fractional value instead of silently truncating it", () => {
+        expect(parseNonNegativeInteger("5.7", { required: true })).toBeNull();
+      });
+
+      it("rejects exponent notation instead of silently truncating it", () => {
+        expect(parseNonNegativeInteger("1e5", { required: true })).toBeNull();
+      });
+
+      it("rejects trailing whitespace-then-garbage", () => {
+        expect(parseNonNegativeInteger(" 5x ", { required: true })).toBeNull();
+      });
+
+      it("still accepts a comma-grouped integer (no regression)", () => {
+        expect(parseNonNegativeInteger("1,000", { required: true })).toBe(1000);
+      });
+
+      it("still rejects a negative value", () => {
+        expect(parseNonNegativeInteger("-5", { required: true })).toBeNull();
+      });
+
+      it("still defaults a blank, non-required value to 0", () => {
+        expect(parseNonNegativeInteger("", { required: false })).toBe(0);
+      });
+
+      it("still treats a blank, required value as missing (null)", () => {
+        expect(parseNonNegativeInteger("", { required: true })).toBeNull();
+      });
+    });
+
+    it("blocks a malformed No. rec value (digit-prefixed garbage) instead of silently truncating it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "10abc" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("No. rec must be a non-negative integer");
+    });
+
+    it("blocks a malformed No. rec value (fractional) instead of silently truncating it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "5.7" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("No. rec must be a non-negative integer");
+    });
+
+    it("blocks a malformed loss-column value (digit-prefixed garbage) instead of silently truncating it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ emerg: "2abc" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("Emerg. in transit must be a non-negative integer");
+    });
+
+    it("blocks a malformed loss-column value (exponent notation) instead of silently truncating it", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ poorEmerg: "1e2" })].join("\n"),
+      );
+      expect(result.rows).toHaveLength(0);
+      expect(result.rowErrors[0]).toContain("Poor emerg must be a non-negative integer");
     });
 
     it("still parses blank Released as unknown and explicit zero as known zero after adding the upper bound (no regression)", () => {
@@ -425,6 +489,58 @@ describe("shipment-import-parser", () => {
         [VALID_HEADER_ROW, buildStrictRow({ released: "0" })].join("\n"),
       );
       expect(zero.rows[0]?.goodEmergence).toBe(0);
+    });
+  });
+
+  describe("blank-row handling (row-number integrity)", () => {
+    it("reports the correct worksheet row number for a row after a blank line", () => {
+      const input = [
+        VALID_HEADER_ROW, // row 1
+        buildStrictRow(), // row 2, valid
+        "", // row 3, blank
+        buildStrictRow({ species: "" }), // row 4, invalid
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rowErrors[0]).toContain("Row 4:");
+    });
+
+    it("keeps every subsequent row number correct across multiple scattered blank lines", () => {
+      const input = [
+        VALID_HEADER_ROW, // row 1
+        "", // row 2, blank
+        buildStrictRow(), // row 3, valid
+        "", // row 4, blank
+        "", // row 5, blank
+        buildStrictRow({ species: "" }), // row 6, invalid
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rowErrors[0]).toContain("Row 6:");
+    });
+
+    it("detects the header correctly and reports the correct row number when a blank line precedes the header", () => {
+      const input = [
+        "", // row 1, blank
+        VALID_HEADER_ROW, // row 2
+        buildStrictRow({ species: "" }), // row 3, invalid
+      ].join("\n");
+      const result = parseShipmentImportRowsStrict(input);
+      expect(
+        result.issues.some((issue) => issue.message.startsWith("Missing required column")),
+      ).toBe(false);
+      expect(result.rowErrors[0]).toContain("Row 3:");
+    });
+
+    it("handles Windows line endings with a blank line the same way", () => {
+      const input = [VALID_HEADER_ROW, buildStrictRow(), "", buildStrictRow({ species: "" })].join(
+        "\r\n",
+      );
+      const result = parseShipmentImportRowsStrict(input);
+      expect(result.rowErrors[0]).toContain("Row 4:");
+    });
+
+    it("still requires a header and at least one data row when extra blank lines are present", () => {
+      const result = parseShipmentImportRowsStrict(["", VALID_HEADER_ROW, "", ""].join("\n"));
+      expect(result.issues[0]?.message).toBe("Provide a header row and at least one data row.");
     });
   });
 

@@ -45,8 +45,12 @@ export function parseNonNegativeInteger(value: string, { required }: { required:
     return required ? null : 0;
   }
 
-  const parsed = Number.parseInt(trimmed.replace(/,/g, ""), 10);
-  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  const withoutCommas = trimmed.replace(/,/g, "");
+  const parsed = Number.parseInt(withoutCommas, 10);
+  // The round-trip check rejects anything `Number.parseInt` only partially consumed (trailing
+  // characters, decimals, exponent notation) instead of silently truncating it to a different
+  // number — same guard `parseReleasedQuantity` below already relies on.
+  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== withoutCommas) return null;
 
   return parsed;
 }
@@ -100,12 +104,8 @@ export function parseExcelDateToIso(value: string) {
 //
 // This is the only shipment-import parsing contract this module implements — exact header
 // matching, required `No. rec`, blocking (not normalized) arrival-before-ship-date, tri-state
-// Released parsing, accounting-bound validation (including the PostgreSQL integer upper bound,
-// hardening checkpoint, review section 15.2), and mixed-duplicate-species-Released rejection. The
-// earlier fuzzy-matching legacy parser (`parseShipmentImportRows`/`groupShipmentImportRows`/
-// `detectShipmentImportHeaderKey`) that once lived here has been removed — confirmed, by a
-// repo-wide search, to have had zero callers anywhere outside its own definition and its own
-// dedicated tests since the service layer was wired onto this strict contract in Phase 3B.
+// Released parsing, accounting-bound validation (including the PostgreSQL integer upper bound),
+// and mixed-duplicate-species-Released rejection.
 // =============================================================================================
 
 export type StrictShipmentImportHeaderKey =
@@ -150,11 +150,11 @@ const STRICT_METRIC_KEYS = [
 
 /** PostgreSQL `integer` (`int4`) column maximum — every quantity column this parser produces
  * (`No. rec`, the six loss columns, and `Released`) is stored in an `integer` column
- * (`shipment_items`, confirmed against `flutr_import_test`'s actual schema), so no value — nor any
- * post-grouping sum of several otherwise-valid rows for the same shipment+species key — may exceed
- * this. Enforced in two places: per-row here in `parseShipmentImportRowsStrict`, and again on the
- * aggregated/summed value in `groupShipmentImportRowsStrict`, since summing several individually
- * in-bounds rows can still overflow (hardening checkpoint, review section 15.2). */
+ * (`shipment_items`), so no value — nor any post-grouping sum of several otherwise-valid rows for
+ * the same shipment+species key — may exceed this. Enforced in two places: per-row here in
+ * `parseShipmentImportRowsStrict`, and again on the aggregated/summed value in
+ * `groupShipmentImportRowsStrict`, since summing several individually in-bounds rows can still
+ * overflow. */
 export const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 // Keep explicit (not positionally derived from CANONICAL_SHIPMENT_IMPORT_HEADERS) so a reorder
@@ -327,12 +327,15 @@ export function parseReleasedQuantity(value: string): ParsedReleasedQuantity {
 }
 
 export function parseShipmentImportRowsStrict(rawText: string): StrictParsedShipmentImportResult {
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0);
+  // Blank lines are kept in `lines` (not filtered out) so `lineIndex` always matches the real
+  // worksheet row — filtering them first would shift every row number reported after the first
+  // blank line. Blanks are skipped individually inside the loop below instead.
+  const lines = rawText.split(/\r?\n/).map((line) => line.trimEnd());
 
-  if (lines.length < 2) {
+  const headerIndex = lines.findIndex((line) => line.trim().length > 0);
+  const nonBlankLineCount = lines.filter((line) => line.trim().length > 0).length;
+
+  if (headerIndex === -1 || nonBlankLineCount < 2) {
     const issues: ShipmentImportIssue[] = [
       {
         rowNumber: null,
@@ -344,7 +347,7 @@ export function parseShipmentImportRowsStrict(rawText: string): StrictParsedShip
     return { rows: [], issues, rowErrors: issues.map(formatShipmentImportIssue) };
   }
 
-  const headerLine = lines[0].replace(/^﻿/, "");
+  const headerLine = lines[headerIndex].replace(/^﻿/, "");
   const delimiter = headerLine.split("\t").length >= headerLine.split(",").length ? "\t" : ",";
   const headerCells = splitDelimitedLine(headerLine, delimiter);
 
@@ -366,7 +369,9 @@ export function parseShipmentImportRowsStrict(rawText: string): StrictParsedShip
   const rows: StrictParsedShipmentImportRow[] = [];
   const issues: ShipmentImportIssue[] = [];
 
-  for (let lineIndex = 1; lineIndex < lines.length; lineIndex += 1) {
+  for (let lineIndex = headerIndex + 1; lineIndex < lines.length; lineIndex += 1) {
+    if (!lines[lineIndex].trim()) continue; // blank worksheet row — not a data row, no issue raised
+
     const cells = splitDelimitedLine(lines[lineIndex], delimiter);
     const rowNumber = lineIndex + 1;
 
@@ -658,11 +663,11 @@ export function groupShipmentImportRowsStrict(
         good_emergence: goodEmergence,
       });
 
-      // Post-grouping aggregate bound check (hardening checkpoint, review section 15.2): summing
-      // several individually in-bounds rows for the same shipment+species key can still overflow
-      // PostgreSQL's `integer` column even though no single contributing row does — a per-row-only
-      // check (above, in `parseShipmentImportRowsStrict`) cannot catch this. Checked for every
-      // aggregated field; `good_emergence` is included only when known (never when `null`).
+      // Post-grouping aggregate bound check: summing several individually in-bounds rows for the
+      // same shipment+species key can still overflow PostgreSQL's `integer` column even though no
+      // single contributing row does — a per-row-only check (above, in
+      // `parseShipmentImportRowsStrict`) cannot catch this. Checked for every aggregated field;
+      // `good_emergence` is included only when known (never when `null`).
       const aggregateFields: { value: number; field: string }[] = [
         { value: numberReceived, field: "No. rec" },
         { value: emergedInTransit, field: "Emerg. in transit" },
