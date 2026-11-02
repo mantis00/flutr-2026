@@ -30,12 +30,15 @@ function NavListItem({
   // Children are only worth showing once you are inside the section; otherwise
   // the sidebar would carry every guide at all times.
   const expanded = inSection && !!item.children?.length;
+  // The highlighted item announces itself as current, except when one of its
+  // own children is the page you are on — then the child carries it instead.
+  const childIsCurrent = !!item.children?.some((child) => pathname === `${basePath}${child.href}`);
 
   return (
     <li>
       <Link
         href={href}
-        aria-current={pathname === href ? "page" : undefined}
+        aria-current={inSection && !childIsCurrent ? "page" : undefined}
         onClick={onNavigate}
         className={cn(
           "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
