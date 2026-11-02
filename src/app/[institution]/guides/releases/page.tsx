@@ -90,9 +90,9 @@ export default async function ReleasesGuidePage() {
           title="What visitors see"
           shot={{
             src: "/docs/guides/releases-public-gallery.webp",
-            alt: "The public species gallery listing the institution's butterflies",
+            alt: "The public species gallery listing the institution's butterflies, sorted by name",
             caption:
-              "The public gallery and statistics pages are calculated from your releases — nothing here is typed in by hand.",
+              "The public gallery lists the species your institution carries. Sorting by In Flight narrows it to the ones flying right now, which is why it can look empty between releases.",
           }}
         >
           <p>
@@ -116,8 +116,9 @@ export default async function ReleasesGuidePage() {
             <p>
               Butterflies leave the in-flight count on their own. A release stops counting once its
               species&apos; lifespan has passed since the release date — so the public number falls
-              without you doing anything. Adjust a species&apos; lifespan on the{" "}
-              <strong>Butterflies</strong> page if it doesn&apos;t match what you observe.
+              without you doing anything, and the statistics page reads &ldquo;No butterflies are
+              currently in flight&rdquo; once the last one ages out. Adjust a species&apos; lifespan
+              on the <strong>Butterflies</strong> page if it doesn&apos;t match what you observe.
             </p>
             <p>
               The map on the statistics page shows where your species come from in the wild, not

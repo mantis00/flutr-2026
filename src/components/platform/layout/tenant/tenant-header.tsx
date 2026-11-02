@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Link } from "@/components/ui/link";
-import { CircleQuestionMark, ExternalLink, Menu } from "lucide-react";
+import { ExternalLink, Menu } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -97,12 +97,6 @@ export default function TenantHeader({
           <Button variant="outline" size="icon" asChild className="sm:hidden">
             <Link href={basePath} aria-label="View public site">
               <ExternalLink className="size-4" aria-hidden="true" />
-            </Link>
-          </Button>
-
-          <Button variant="outline" size="icon" asChild>
-            <Link href={`${basePath}/guides`} aria-label="Help and guides">
-              <CircleQuestionMark className="size-4" aria-hidden="true" />
             </Link>
           </Button>
 
