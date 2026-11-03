@@ -434,6 +434,7 @@ export function useShipmentImport({
    * afterward and populate the now-visible paste textarea with the old file's content, since both
    * views are bound to the same `rawText` state. */
   function setIsPasteMode(value: boolean) {
+    if (runGuardRef.current.isActive) return; // a commit run is in progress — ignore
     fileReadGuardRef.current.bump();
     setIsReadingFile(false);
     setIsPasteModeState(value);

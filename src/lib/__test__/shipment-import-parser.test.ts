@@ -213,6 +213,29 @@ describe("shipment-import-parser", () => {
       expect(parseReleasedQuantity(",1")).toEqual({ kind: "invalid" });
       expect(parseReleasedQuantity("1,,0")).toEqual({ kind: "invalid" });
     });
+
+    it("accepts leading-zero values (regression: the round-trip check used to reject these)", () => {
+      expect(parseReleasedQuantity("00")).toEqual({ kind: "value", value: 0 });
+      expect(parseReleasedQuantity("007")).toEqual({ kind: "value", value: 7 });
+      expect(parseReleasedQuantity("0010")).toEqual({ kind: "value", value: 10 });
+    });
+
+    it("still accepts a value at the edge of JS's safe-integer range", () => {
+      expect(parseReleasedQuantity("9007199254740991")).toEqual({
+        kind: "value",
+        value: 9007199254740991,
+      });
+    });
+
+    it("rejects a value one past MAX_SAFE_INTEGER even though it round-trips exactly (regression)", () => {
+      expect(parseReleasedQuantity("9007199254740992")).toEqual({ kind: "invalid" });
+      expect(parseReleasedQuantity("09007199254740992")).toEqual({ kind: "invalid" });
+      expect(parseReleasedQuantity("9,007,199,254,740,992")).toEqual({ kind: "invalid" });
+    });
+
+    it("still rejects a precision-losing value past the safe-integer range", () => {
+      expect(parseReleasedQuantity("9007199254740993")).toEqual({ kind: "invalid" });
+    });
   });
 
   describe("parseShipmentImportRowsStrict", () => {
@@ -469,6 +492,32 @@ describe("shipment-import-parser", () => {
         expect(parseNonNegativeInteger("1,,0", { required: true })).toBeNull();
       });
 
+      it("accepts leading-zero values (regression: the round-trip check used to reject these)", () => {
+        expect(parseNonNegativeInteger("0", { required: true })).toBe(0);
+        expect(parseNonNegativeInteger("00", { required: true })).toBe(0);
+        expect(parseNonNegativeInteger("007", { required: true })).toBe(7);
+        expect(parseNonNegativeInteger("0010", { required: true })).toBe(10);
+      });
+
+      it("still rejects a value too large to survive JS integer precision, leading zeros or not", () => {
+        expect(parseNonNegativeInteger("99999999999999999999", { required: true })).toBeNull();
+        expect(parseNonNegativeInteger("09007199254740993", { required: true })).toBeNull();
+      });
+
+      it("still accepts a value at the edge of JS's safe-integer range", () => {
+        expect(parseNonNegativeInteger("9007199254740991", { required: true })).toBe(
+          9007199254740991,
+        );
+      });
+
+      it("rejects a value one past MAX_SAFE_INTEGER even though it round-trips exactly (regression)", () => {
+        // 2**53 is still exactly representable as a float, so the string round-trip check alone
+        // can't catch it — only Number.isSafeInteger bounds it correctly.
+        expect(parseNonNegativeInteger("9007199254740992", { required: true })).toBeNull();
+        expect(parseNonNegativeInteger("09007199254740992", { required: true })).toBeNull();
+        expect(parseNonNegativeInteger("9,007,199,254,740,992", { required: true })).toBeNull();
+      });
+
       it("still rejects a negative value", () => {
         expect(parseNonNegativeInteger("-5", { required: true })).toBeNull();
       });
@@ -545,6 +594,30 @@ describe("shipment-import-parser", () => {
       expect(result.rowErrors).toEqual([]);
       expect(result.rows[0]?.numberReceived).toBe(1234);
       expect(result.rows[0]?.goodEmergence).toBe(1000);
+    });
+
+    it("accepts a leading-zero No. rec value instead of rejecting it as malformed (regression)", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ noRec: "007", released: "7" })].join("\n"),
+      );
+      expect(result.rowErrors).toEqual([]);
+      expect(result.rows[0]?.numberReceived).toBe(7);
+    });
+
+    it("accepts a leading-zero loss-column value instead of rejecting it as malformed (regression)", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ emerg: "00" })].join("\n"),
+      );
+      expect(result.rowErrors).toEqual([]);
+      expect(result.rows[0]?.emergedInTransit).toBe(0);
+    });
+
+    it("accepts a leading-zero Released value instead of rejecting it as malformed (regression)", () => {
+      const result = parseShipmentImportRowsStrict(
+        [VALID_HEADER_ROW, buildStrictRow({ released: "0010" })].join("\n"),
+      );
+      expect(result.rowErrors).toEqual([]);
+      expect(result.rows[0]?.goodEmergence).toBe(10);
     });
 
     it("still parses blank Released as unknown and explicit zero as known zero after adding the upper bound (no regression)", () => {

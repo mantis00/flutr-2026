@@ -55,10 +55,18 @@ function parseGroupedNonNegativeInteger(trimmed: string): number | null {
   const withoutCommas = trimmed.replace(/,/g, "");
   const parsed = Number.parseInt(withoutCommas, 10);
   // The round-trip check rejects anything `Number.parseInt` only partially consumed (trailing
-  // characters, decimals, exponent notation) instead of silently truncating it to a different
-  // number. The grouping check above already rules out stray non-digit/non-comma characters, so
-  // this is now a defensive second layer rather than the only guard.
-  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== withoutCommas) return null;
+  // characters, decimals, exponent notation) or any value too large to survive JS's
+  // float-precision integer representation — in both cases, converting `parsed` back to a string
+  // won't match the input digits. Leading zeros round-trip to a shorter string by design (`"007"`
+  // -> `7` -> `"7"`), so they're stripped from the comparison target rather than from the
+  // comparison itself, which would mask the real overflow/truncation cases above.
+  const normalizedDigits = withoutCommas.replace(/^0+(?=\d)/, "");
+  // The round-trip check alone isn't enough: `2**53` (one past `MAX_SAFE_INTEGER`) is still
+  // exactly representable as a float, so it round-trips through the string comparison above with
+  // no precision loss to catch — `Number.isSafeInteger` is the only thing that actually bounds it.
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || String(parsed) !== normalizedDigits) {
+    return null;
+  }
 
   return parsed;
 }

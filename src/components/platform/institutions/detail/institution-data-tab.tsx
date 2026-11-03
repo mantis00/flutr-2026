@@ -402,7 +402,7 @@ export default function InstitutionDataTab({
                           error
                             ? "text-destructive"
                             : warn
-                              ? "text-amber-700"
+                              ? "text-amber-900 dark:text-amber-100"
                               : "text-muted-foreground",
                         )}
                       >
@@ -411,7 +411,11 @@ export default function InstitutionDataTab({
                       <span
                         className={cn(
                           "text-xs font-medium tabular-nums",
-                          error ? "text-destructive" : warn ? "text-amber-700" : "text-foreground",
+                          error
+                            ? "text-destructive"
+                            : warn
+                              ? "text-amber-900 dark:text-amber-100"
+                              : "text-foreground",
                         )}
                       >
                         {value}
