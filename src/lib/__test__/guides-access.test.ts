@@ -24,7 +24,7 @@ import {
 const authMock = auth as unknown as jest.Mock;
 
 const SESSION = {
-  user: { id: "1", role: "EMPLOYEE", institutionId: 1 },
+  user: { id: "1", role: "EMPLOYEE", institutionId: 1, institutionSlug: "reiman-gardens" },
 };
 
 beforeEach(() => {
@@ -101,22 +101,45 @@ describe("isGuidesUnlocked", () => {
 });
 
 describe("canReadGuides", () => {
-  it("allows a signed-in user with no cookie", async () => {
+  it("allows a signed-in user on their own institution, with no cookie", async () => {
     authMock.mockResolvedValue(SESSION);
-    await expect(canReadGuides()).resolves.toBe(true);
+    await expect(canReadGuides("reiman-gardens")).resolves.toBe(true);
+  });
+
+  it("refuses a signed-in user asking for another institution", async () => {
+    // The page has to decide this itself: the layout's redirect can't stop the
+    // page body streaming out ahead of it.
+    authMock.mockResolvedValue(SESSION);
+    await expect(canReadGuides("some-other-institution")).resolves.toBe(false);
+  });
+
+  it("does not let the guides password rescue a cross-tenant request", async () => {
+    await setGuidesUnlockedCookie();
+    authMock.mockResolvedValue(SESSION);
+    await expect(canReadGuides("some-other-institution")).resolves.toBe(false);
+  });
+
+  it("allows a SUPERUSER on any institution", async () => {
+    authMock.mockResolvedValue({
+      user: { id: "1", role: "SUPERUSER", institutionId: 1, institutionSlug: "reiman-gardens" },
+    });
+    await expect(canReadGuides("some-other-institution")).resolves.toBe(true);
   });
 
   it("allows a signed-out reader holding a valid cookie", async () => {
     await setGuidesUnlockedCookie();
-    await expect(canReadGuides()).resolves.toBe(true);
+    await expect(canReadGuides("reiman-gardens")).resolves.toBe(true);
   });
 
   it("refuses a signed-out reader with no cookie", async () => {
-    await expect(canReadGuides()).resolves.toBe(false);
+    await expect(canReadGuides("reiman-gardens")).resolves.toBe(false);
   });
 
-  it("refuses a session that carries no usable user", async () => {
+  it("falls back to the cookie when the session carries no usable user", async () => {
     authMock.mockResolvedValue({ user: { id: "1" } });
-    await expect(canReadGuides()).resolves.toBe(false);
+    await expect(canReadGuides("reiman-gardens")).resolves.toBe(false);
+
+    await setGuidesUnlockedCookie();
+    await expect(canReadGuides("reiman-gardens")).resolves.toBe(true);
   });
 });

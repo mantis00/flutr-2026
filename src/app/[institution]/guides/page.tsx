@@ -32,9 +32,8 @@ const FAQS = [
 ];
 
 export default async function GuidesPage({ params }: { params: Promise<{ institution: string }> }) {
-  if (!(await canReadGuides())) return null;
-
   const { institution } = await params;
+  if (!(await canReadGuides(institution))) return null;
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">

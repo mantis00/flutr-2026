@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { BookOpen } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "@/components/ui/link";
@@ -21,7 +21,11 @@ export function GuidesPasswordGate() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <BookOpen className="text-primary size-7" aria-hidden="true" />
-          <CardTitle>Staff guides</CardTitle>
+          {/* CardTitle renders a div, and this is the whole page for a locked-out
+              reader, so the title is written out as a real h1 instead. */}
+          <h1 data-slot="card-title" className="leading-none font-semibold">
+            Staff guides
+          </h1>
           <CardDescription>
             These guides explain how to run Flutr. Sign in, or enter the shared guides password if
             you don&apos;t have an account.

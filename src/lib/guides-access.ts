@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 
 import { auth } from "@/auth";
-import { requireUser } from "@/lib/authz";
+import { canCrossTenant, requireUser } from "@/lib/authz";
 
 export const GUIDES_COOKIE = "guides_access";
 
@@ -52,15 +52,19 @@ export async function isGuidesUnlocked(): Promise<boolean> {
 }
 
 /**
- * Guide pages must call this themselves, not rely on the layout. A layout that
- * withholds `children` still leaves the page rendered in the RSC payload, so
- * gating only there ships the content to locked-out readers anyway.
+ * Guide pages must call this themselves, not rely on the layout. A layout can
+ * neither withhold the page by dropping `children` nor stop it by redirecting:
+ * the page renders in parallel and streams out ahead of the redirect, so
+ * gating only in the layout ships the content either way.
+ *
+ * `slug` is the institution in the URL. A signed-in user may read only their
+ * own institution's guides unless they can cross tenants.
  */
-export async function canReadGuides(): Promise<boolean> {
+export async function canReadGuides(slug: string): Promise<boolean> {
   const session = await auth();
   try {
-    requireUser(session);
-    return true;
+    const user = requireUser(session);
+    return canCrossTenant(user) || session?.user?.institutionSlug === slug;
   } catch {
     return isGuidesUnlocked();
   }

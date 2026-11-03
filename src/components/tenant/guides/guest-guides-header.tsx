@@ -29,20 +29,27 @@ export function GuestGuidesHeader() {
   );
 
   return (
-    <header role="banner" className="bg-background flex h-14 shrink-0 items-center border-b px-6">
-      <div className="flex min-w-0 flex-1 items-center justify-between gap-6">
+    <header
+      role="banner"
+      className="bg-background flex h-14 shrink-0 items-center border-b px-4 sm:px-6"
+    >
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-3 sm:gap-6">
+        {/* min-w-0 so the institution name can actually shrink: a flex item
+            defaults to min-width:auto, which `truncate` alone won't override. */}
         <Link
           href={ROUTES.tenant.guides(slug)}
-          className="text-foreground focus-visible:ring-ring truncate rounded-sm text-lg font-bold tracking-tight focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          className="text-foreground focus-visible:ring-ring min-w-0 truncate rounded-sm text-lg font-bold tracking-tight focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           {institution?.name ?? "Flutr"} guides
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
-                <span className="max-w-40 truncate">{current?.title ?? "All guides"}</span>
+                <span className="max-w-28 truncate sm:max-w-40">
+                  {current?.title ?? "All guides"}
+                </span>
                 <ChevronDown className="ml-1 size-3.5" aria-hidden="true" />
               </Button>
             </DropdownMenuTrigger>

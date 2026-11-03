@@ -1,8 +1,13 @@
 import { GuideHeader, GuideNote } from "@/components/tenant/guides/guide-step";
 import { canReadGuides } from "@/lib/guides-access";
 
-export default async function ImportGuidePage() {
-  if (!(await canReadGuides())) return null;
+export default async function ImportGuidePage({
+  params,
+}: {
+  params: Promise<{ institution: string }>;
+}) {
+  const { institution } = await params;
+  if (!(await canReadGuides(institution))) return null;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-6 py-10">
