@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/shared/date-picker";
 import { Label } from "@/components/ui/label";
@@ -14,11 +14,16 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ROUTES } from "@/lib/routes";
-import { cn } from "@/lib/utils";
+import { cn, downloadBlob } from "@/lib/utils";
+import {
+  buildCanonicalXlsxTemplateBlob,
+  buildValidationReportCsv,
+} from "@/lib/shipment-import-utils";
 import { useShipmentImport } from "@/hooks/use-shipment-import";
 import { useShipmentViewer } from "@/hooks/use-shipment-viewer";
 import DangerZone from "./danger-zone";
 import FileDropZone from "./file-drop-zone";
+import ImportExportGuideDialog from "./import-export-guide-dialog";
 import ImportResultsPanel from "./import-results-panel";
 import ShipmentViewer from "./shipment-viewer";
 
@@ -86,6 +91,8 @@ export default function InstitutionDataTab({
     handlePasteChange,
     preview,
     commitSummary,
+    yearProgress,
+    yearRunningTotals,
     handleReset,
     handleParsePreview,
     handleCommitImport,
@@ -118,6 +125,50 @@ export default function InstitutionDataTab({
     onImportSuccess: loadShipments,
   });
 
+  // Disabling the Commit Import button while it holds focus (its own `disabled={isImporting}`
+  // below) forces the browser to blur it to <body>, with no code path that otherwise restores
+  // focus. Restoring unconditionally on completion is wrong: it would steal focus back even after
+  // the user deliberately moved it elsewhere (e.g. to "Download Validation Report") during the
+  // run. Correct restoration needs two facts, not one: (1) whether the button genuinely had focus
+  // when the run *started* — captured synchronously in the click handler itself, before
+  // `handleCommitImport` disables the button, because the native blur-to-<body> happens as part
+  // of that same DOM mutation; reading `document.activeElement` from any effect (even a layout
+  // effect) would already be too late to see the button as focused. (2) whether anything has
+  // claimed focus *since* — checked only at completion, via `document.activeElement`. Restoring
+  // focus is correct only when both hold: the button had focus at the start, and focus is still
+  // sitting unclaimed on `<body>` at the end.
+  const commitButtonRef = useRef<HTMLButtonElement>(null);
+  const wasImportingRef = useRef(false);
+  const commitButtonHadFocusAtStartRef = useRef(false);
+  useEffect(() => {
+    if (wasImportingRef.current && !isImporting) {
+      if (commitButtonHadFocusAtStartRef.current && document.activeElement === document.body) {
+        commitButtonRef.current?.focus();
+      }
+      commitButtonHadFocusAtStartRef.current = false;
+    }
+    wasImportingRef.current = isImporting;
+  }, [isImporting]);
+
+  function handleCommitImportClick() {
+    commitButtonHadFocusAtStartRef.current = document.activeElement === commitButtonRef.current;
+    handleCommitImport();
+  }
+
+  function handleDownloadValidationReport() {
+    if (!preview) return;
+    const csv = buildValidationReportCsv(preview.issues);
+    downloadBlob(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+      "shipment-import-validation-report.csv",
+    );
+  }
+
+  async function handleDownloadTemplate() {
+    const blob = await buildCanonicalXlsxTemplateBlob();
+    downloadBlob(blob, "shipment-import-template.xlsx");
+  }
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -127,9 +178,24 @@ export default function InstitutionDataTab({
       {/* Import Hub                                                           */}
       {/* ------------------------------------------------------------------ */}
       <section aria-labelledby="import-hub-heading">
-        <h2 id="import-hub-heading" className="mb-1 text-sm font-semibold">
-          Historical Shipment Import
-        </h2>
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="import-hub-heading" className="text-sm font-semibold">
+            Historical Shipment Import
+          </h2>
+          <div className="flex flex-wrap gap-1">
+            <ImportExportGuideDialog />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => void handleDownloadTemplate()}
+            >
+              <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+              Download Blank Template
+            </Button>
+          </div>
+        </div>
         <p className="text-muted-foreground mb-4 text-sm">
           {isTenantMode
             ? "Institution admins can import historical shipment records and export current institution data for reporting."
@@ -177,26 +243,40 @@ export default function InstitutionDataTab({
               isPasteMode={isPasteMode}
               onPasteModeChange={setIsPasteMode}
               onRawTextChange={handlePasteChange}
+              disabled={isImporting}
             />
 
             {/* Action buttons */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 onClick={handleParsePreview}
-                disabled={isParsing || !rawText.trim()}
+                disabled={isParsing || isImporting || !rawText.trim()}
               >
                 {isParsing && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
                 {isParsing ? "Parsing…" : "Parse Preview"}
               </Button>
               <Button
+                ref={commitButtonRef}
                 variant="outline"
-                onClick={handleCommitImport}
+                onClick={handleCommitImportClick}
                 disabled={isImporting || !canCommit || !tenantReady}
               >
                 {isImporting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
                 {isImporting ? "Importing…" : "Commit Import"}
               </Button>
+              {preview && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleDownloadValidationReport}
+                >
+                  <Download className="size-3.5" aria-hidden="true" />
+                  Download Validation Report
+                </Button>
+              )}
             </div>
 
             {/* Error message */}
@@ -209,6 +289,9 @@ export default function InstitutionDataTab({
             <ImportResultsPanel
               preview={preview}
               commitSummary={commitSummary}
+              yearProgress={yearProgress}
+              yearRunningTotals={yearRunningTotals}
+              isImporting={isImporting}
               onReset={handleReset}
             />
 
@@ -219,8 +302,12 @@ export default function InstitutionDataTab({
 
           {/* ---- Right sidebar: settings + export ---- */}
           <aside className="flex flex-col gap-4" aria-label="Import settings and export">
-            {/* Import Settings */}
-            <fieldset className="flex flex-col gap-4 rounded-md border p-3">
+            {/* Import Settings — disabled while a commit run is active, so options cannot change
+                mid-sequence (the hook already defensively no-ops the setters regardless). */}
+            <fieldset
+              className="flex flex-col gap-4 rounded-md border p-3 disabled:opacity-60"
+              disabled={isImporting}
+            >
               <legend className="px-1 text-xs font-medium">Import Settings</legend>
 
               <div className="flex items-start justify-between gap-3">
@@ -315,7 +402,7 @@ export default function InstitutionDataTab({
                           error
                             ? "text-destructive"
                             : warn
-                              ? "text-amber-700"
+                              ? "text-amber-900 dark:text-amber-100"
                               : "text-muted-foreground",
                         )}
                       >
@@ -324,7 +411,11 @@ export default function InstitutionDataTab({
                       <span
                         className={cn(
                           "text-xs font-medium tabular-nums",
-                          error ? "text-destructive" : warn ? "text-amber-700" : "text-foreground",
+                          error
+                            ? "text-destructive"
+                            : warn
+                              ? "text-amber-900 dark:text-amber-100"
+                              : "text-foreground",
                         )}
                       >
                         {value}

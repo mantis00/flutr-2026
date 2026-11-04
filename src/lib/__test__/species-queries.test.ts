@@ -14,7 +14,11 @@ jest.mock("@/lib/db", () => ({
 }));
 
 import { butterfly_species_institution } from "@/lib/schema";
-import { ensureSpeciesLinksForInstitution, upsertSpeciesOverride } from "@/lib/queries/species";
+import {
+  createSpecies,
+  ensureSpeciesLinksForInstitution,
+  upsertSpeciesOverride,
+} from "@/lib/queries/species";
 
 const conflictTarget = [
   butterfly_species_institution.butterfly_species_id,
@@ -58,6 +62,42 @@ describe("species queries", () => {
 
     expect(txInsert).toHaveBeenCalledWith(butterfly_species_institution);
     expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  describe("createSpecies", () => {
+    const minimalInput = {
+      scientific_name: "danaus plexippus",
+      common_name: "Monarch",
+      family: "Nymphalidae",
+      sub_family: "Danainae",
+      lifespan_days: 30,
+      range: ["North America"],
+    };
+
+    it("uses the plain db client by default (existing platform species-admin caller)", async () => {
+      const dbReturning = jest.fn().mockResolvedValueOnce([{ id: 1, ...minimalInput }]);
+      const dbValues = jest.fn(() => ({ returning: dbReturning }));
+      mockInsert.mockReturnValueOnce({ values: dbValues });
+
+      const row = await createSpecies(minimalInput);
+
+      expect(row).toEqual({ id: 1, ...minimalInput });
+      expect(dbValues).toHaveBeenCalledWith(minimalInput);
+    });
+
+    it("uses a supplied executor instead of the plain db client", async () => {
+      const txReturning = jest.fn().mockResolvedValueOnce([{ id: 2, ...minimalInput }]);
+      const txValues = jest.fn(() => ({ returning: txReturning }));
+      const txInsert = jest.fn(() => ({ values: txValues }));
+
+      const row = await createSpecies(minimalInput, { insert: txInsert } as unknown as Parameters<
+        typeof createSpecies
+      >[1]);
+
+      expect(row).toEqual({ id: 2, ...minimalInput });
+      expect(txInsert).toHaveBeenCalledTimes(1);
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
   });
 
   describe("upsertSpeciesOverride", () => {
