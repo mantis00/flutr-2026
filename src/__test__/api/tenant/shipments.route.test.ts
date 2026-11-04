@@ -274,6 +274,33 @@ describe("Shipments API", () => {
       expect(mockCreateTenantShipment).not.toHaveBeenCalled();
     });
 
+    it("rejects a create payload that attempts to set good_emergence directly (security regression)", async () => {
+      const payload = validCreatePayload();
+      payload.items[0] = {
+        ...payload.items[0],
+        good_emergence: 9,
+      } as unknown as (typeof payload.items)[0];
+
+      const response = (await postShipment(makePostRequest(payload, SLUG)))!;
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+      expect(mockCreateTenantShipment).not.toHaveBeenCalled();
+    });
+
+    it("rejects a create payload attempting to set good_emergence to null directly (security regression)", async () => {
+      const payload = validCreatePayload();
+      payload.items[0] = {
+        ...payload.items[0],
+        good_emergence: null,
+      } as unknown as (typeof payload.items)[0];
+
+      const response = (await postShipment(makePostRequest(payload, SLUG)))!;
+
+      expect(response.status).toBe(400);
+      expect(mockCreateTenantShipment).not.toHaveBeenCalled();
+    });
+
     it("permits creation when all six loss categories exactly equal number received", async () => {
       const payload = validCreatePayload();
       payload.items[0] = {
@@ -496,6 +523,35 @@ describe("Shipments API", () => {
         path: "add_items[0]",
         message: "Total losses cannot exceed number received",
       });
+      expect(mockUpdateTenantShipment).not.toHaveBeenCalled();
+    });
+
+    it("rejects an added item that attempts to set good_emergence directly (security regression)", async () => {
+      const response = (await patchShipmentById(
+        makePatchRequest(
+          "7",
+          {
+            add_items: [
+              {
+                butterfly_species_id: 10,
+                number_received: 6,
+                emerged_in_transit: 1,
+                damaged_in_transit: 1,
+                diseased_in_transit: 1,
+                parasite: 1,
+                non_emergence: 1,
+                poor_emergence: 1,
+                good_emergence: 6,
+              },
+            ],
+          },
+          SLUG,
+        ),
+        routeContext("7"),
+      ))!;
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
       expect(mockUpdateTenantShipment).not.toHaveBeenCalled();
     });
 

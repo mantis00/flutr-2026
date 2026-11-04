@@ -6,11 +6,39 @@ jest.mock("@/lib/services/tenant-shipment-import", () => ({
   exportTenantShipmentWorkbook: jest.fn(),
 }));
 
+// The tenant commit route imports `ShipmentImportValidationError` from the shared service
+// module (not the tenant wrapper) to map it to a 400 response — mocked here with the same
+// minimal class shape as the platform route test, for the same reason (avoids pulling in the
+// real module's non-test-friendly dependency chain, e.g. @/auth).
+jest.mock("@/lib/services/shipment-import", () => ({
+  ShipmentImportValidationError: class ShipmentImportValidationError extends Error {
+    issues: {
+      rowNumber: number | null;
+      field: string | null;
+      value: string | null;
+      message: string;
+    }[];
+    constructor(
+      issues: {
+        rowNumber: number | null;
+        field: string | null;
+        value: string | null;
+        message: string;
+      }[],
+    ) {
+      super("VALIDATION_FAILED");
+      this.name = "ShipmentImportValidationError";
+      this.issues = issues;
+    }
+  },
+}));
+
 import {
   getTenantShipmentImportPreview,
   commitTenantShipmentImport,
   exportTenantShipmentWorkbook,
 } from "@/lib/services/tenant-shipment-import";
+import { ShipmentImportValidationError } from "@/lib/services/shipment-import";
 import { POST as previewImport } from "@/app/api/tenant/shipments/import/preview/route";
 import { POST as commitImport } from "@/app/api/tenant/shipments/import/commit/route";
 import { GET as exportShipments } from "@/app/api/tenant/shipments/export/route";
@@ -60,26 +88,10 @@ function validPreviewBody() {
 
 function validCommitBody() {
   return {
+    raw_text:
+      "Species,Common name,No. rec,Supplier,Ship date,Arrival date,Emerg. in transit,Damag in transit,No. disea,No. parasit,No emerg,Poor emerg,Released\nCaligo atreus,Owl Butterfly,10,EBN,12/9/25,12/11/25,0,0,0,0,0,0,9",
     preview_hash: `sha256:${"a".repeat(64)}`,
-    shipments: [
-      {
-        supplier_code: "EBN",
-        shipment_date: "2025-12-09T12:00:00.000Z",
-        arrival_date: "2025-12-11T12:00:00.000Z",
-        items: [
-          {
-            scientific_name: "caligo atreus",
-            number_received: 10,
-            emerged_in_transit: 0,
-            damaged_in_transit: 0,
-            diseased_in_transit: 0,
-            parasite: 0,
-            non_emergence: 0,
-            poor_emergence: 0,
-          },
-        ],
-      },
-    ],
+    year: 2025,
   };
 }
 
@@ -109,7 +121,9 @@ describe("Tenant Shipment Import API", () => {
         warnings: [],
         unknown_species: [],
         unknown_suppliers: [],
-        shipments: [],
+        issues: [],
+        existing_shipments: [],
+        years: [2025],
         preview_hash: `sha256:${"b".repeat(64)}`,
       });
 
@@ -130,18 +144,65 @@ describe("Tenant Shipment Import API", () => {
 
     it("returns 200 for valid commit", async () => {
       mockCommitTenantShipmentImport.mockResolvedValueOnce({
+        year: 2025,
         created: 1,
-        failed: 0,
         skipped: 0,
-        failures: [],
         warnings: [],
       });
 
       const response = (await commitImport(makeCommitRequest(validCommitBody(), "demo")))!;
       expect(response.status).toBe(200);
       expect(mockCommitTenantShipmentImport).toHaveBeenCalledWith(
-        expect.objectContaining({ slug: "demo" }),
+        expect.objectContaining({ slug: "demo", year: 2025 }),
       );
+    });
+
+    it("returns 400 with structured issue details for a blocking workbook validation error", async () => {
+      mockCommitTenantShipmentImport.mockRejectedValueOnce(
+        new ShipmentImportValidationError([
+          {
+            rowNumber: 2,
+            field: "Released",
+            value: "-1",
+            message: "Released must be a non-negative integer or blank.",
+          },
+        ]),
+      );
+
+      const response = (await commitImport(makeCommitRequest(validCommitBody(), "demo")))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.details).toContainEqual({
+        path: "Released",
+        message: "Released must be a non-negative integer or blank.",
+      });
+    });
+
+    it("returns 400 when the requested year is not found in the validated workbook", async () => {
+      mockCommitTenantShipmentImport.mockRejectedValueOnce(new Error("YEAR_NOT_FOUND"));
+
+      const response = (await commitImport(makeCommitRequest(validCommitBody(), "demo")))!;
+      expect(response.status).toBe(400);
+    });
+
+    it("returns 409 when another import is already running for this institution", async () => {
+      mockCommitTenantShipmentImport.mockRejectedValueOnce(new Error("IMPORT_ALREADY_RUNNING"));
+
+      const response = (await commitImport(makeCommitRequest(validCommitBody(), "demo")))!;
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe("CONFLICT");
+    });
+
+    it("returns 400 for a legacy { shipments } commit body", async () => {
+      const response = (await commitImport(
+        makeCommitRequest(
+          { preview_hash: `sha256:${"a".repeat(64)}`, shipments: [], options: {} },
+          "demo",
+        ),
+      ))!;
+      expect(response.status).toBe(400);
+      expect(mockCommitTenantShipmentImport).not.toHaveBeenCalled();
     });
   });
 

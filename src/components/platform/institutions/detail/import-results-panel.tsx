@@ -1,7 +1,16 @@
 "use client";
 
+import { CheckCircle2, Circle, Loader2, MinusCircle, XCircle } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { type CommitResponse, type PreviewResponse } from "@/lib/shipment-import-utils";
+import {
+  computeImportProgressSummary,
+  findImportingYear,
+  type YearProgress,
+} from "@/hooks/use-shipment-import";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,8 +19,126 @@ import { type CommitResponse, type PreviewResponse } from "@/lib/shipment-import
 export type ImportResultsPanelProps = {
   preview: PreviewResponse | null;
   commitSummary: CommitResponse | null;
+  yearProgress: YearProgress[] | null;
+  yearRunningTotals: { created: number; skipped: number } | null;
+  isImporting: boolean;
   onReset: () => void;
 };
+
+const STATUS_LABEL: Record<YearProgress["status"], string> = {
+  pending: "Pending",
+  importing: "Importing",
+  completed: "Completed",
+  failed: "Failed",
+  not_attempted: "Not attempted",
+};
+
+const STATUS_BADGE_VARIANT: Record<
+  YearProgress["status"],
+  "secondary" | "default" | "destructive" | "outline"
+> = {
+  pending: "outline",
+  importing: "default",
+  completed: "secondary",
+  failed: "destructive",
+  not_attempted: "outline",
+};
+
+function YearStatusIcon({ status }: { status: YearProgress["status"] }) {
+  switch (status) {
+    case "importing":
+      return <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />;
+    case "completed":
+      return <CheckCircle2 className="size-3.5 text-emerald-600" aria-hidden="true" />;
+    case "failed":
+      return <XCircle className="text-destructive size-3.5" aria-hidden="true" />;
+    case "not_attempted":
+      return <MinusCircle className="text-muted-foreground size-3.5" aria-hidden="true" />;
+    default:
+      return <Circle className="text-muted-foreground size-3.5" aria-hidden="true" />;
+  }
+}
+
+/**
+ * Year-by-year import progress — renders the hook's `yearProgress`/`yearRunningTotals` state.
+ * Never implies this runs as a background job: it reflects exactly
+ * what the client-side loop has observed so far, and the copy below is explicit that closing or
+ * refreshing the page stops the sequence, and that re-validating and retrying (relying on
+ * server-side existing-shipment skipping) is the supported recovery path — never a claim that a
+ * failed request means the server-side transaction didn't commit.
+ */
+function ImportProgressSection({
+  yearProgress,
+  yearRunningTotals,
+}: {
+  yearProgress: YearProgress[];
+  yearRunningTotals: { created: number; skipped: number } | null;
+}) {
+  const { total, completedCount, failedEntry, percent, allCompleted } =
+    computeImportProgressSummary(yearProgress);
+
+  return (
+    <section className="space-y-3 rounded-md border p-4" aria-labelledby="import-progress-heading">
+      <div className="flex items-center justify-between">
+        <p id="import-progress-heading" className="text-sm font-medium">
+          Import Progress
+        </p>
+        <span className="text-muted-foreground text-xs tabular-nums">
+          {completedCount} of {total} year{total !== 1 ? "s" : ""} completed
+        </span>
+      </div>
+
+      <Progress
+        value={percent}
+        aria-label={`Import progress: ${completedCount} of ${total} years completed`}
+      />
+
+      <ul className="space-y-1.5" aria-label="Per-year import status">
+        {yearProgress.map((item) => (
+          <li key={item.year} className="flex items-center justify-between gap-2 text-xs">
+            <span className="flex items-center gap-1.5 font-medium">
+              <YearStatusIcon status={item.status} />
+              {item.year}
+            </span>
+            <span className="flex items-center gap-2">
+              {item.status === "completed" && (
+                <span className="text-muted-foreground tabular-nums">
+                  Created {item.created} · Skipped {item.skipped}
+                </span>
+              )}
+              <Badge variant={STATUS_BADGE_VARIANT[item.status]}>{STATUS_LABEL[item.status]}</Badge>
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {yearRunningTotals && completedCount > 0 && (
+        <p className="text-muted-foreground text-xs" role="status" aria-live="polite">
+          Running totals: {yearRunningTotals.created} created, {yearRunningTotals.skipped} skipped
+          across {completedCount} completed year{completedCount !== 1 ? "s" : ""}.
+        </p>
+      )}
+
+      {failedEntry && (
+        <p className="text-destructive text-sm" role="alert">
+          Import stopped: year {failedEntry.year} failed
+          {failedEntry.error ? ` (${failedEntry.error})` : ""}. Years completed before it remain
+          imported exactly as they are; later years were not attempted. This does not run in the
+          background and will not resume automatically — re-validate the file and import again.
+          Already-imported shipments are detected and skipped automatically, so retrying is safe.
+        </p>
+      )}
+
+      {!failedEntry && allCompleted && (
+        <p className="text-sm text-emerald-700" role="status" aria-live="polite">
+          {yearRunningTotals && yearRunningTotals.created === 0
+            ? "Every shipment in this file already existed and was skipped — nothing new to import."
+            : "Every year imported successfully."}
+        </p>
+      )}
+    </section>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -20,12 +147,32 @@ export type ImportResultsPanelProps = {
 export default function ImportResultsPanel({
   preview,
   commitSummary,
+  yearProgress,
+  yearRunningTotals,
+  isImporting,
   onReset,
 }: ImportResultsPanelProps) {
-  if (!preview && !commitSummary) return null;
+  if (!preview && !commitSummary && !yearProgress) return null;
+
+  const importingYear = findImportingYear(yearProgress);
 
   return (
     <>
+      {/* Screen-reader-only: announces which year is currently importing. Rendered here —
+          unconditionally, as soon as this panel renders at all (i.e. as soon as a preview
+          exists, well before "Commit Import" is even clickable) — rather than inside
+          `ImportProgressSection` (which only mounts once `yearProgress` has entries). Mounting it
+          this early guarantees the browser has already painted it empty, as its own settled DOM
+          node, before the first year ever reaches "importing": `runYearByYearCommit` sets the
+          initial all-"pending" progress and the first year's "importing" status back to back
+          with no `await` between them, so React can (and in practice does) batch both into one
+          commit — if this element mounted only once `yearProgress` existed, its first real paint
+          would already show "Importing year `<N>`…", with no prior empty state for assistive
+          tech to diff against, so the very first announcement would be silently dropped. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {importingYear != null ? `Importing year ${importingYear}…` : ""}
+      </p>
+
       {/* Preview result panel */}
       {preview && (
         <div className="space-y-3 rounded-md border p-4">
@@ -43,20 +190,28 @@ export default function ImportResultsPanel({
           )}
 
           {preview.warnings.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Warnings</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
-                {preview.warnings.slice(0, 20).map((warning, index) => (
+            // A native <details>/<summary> disclosure, not a custom toggle: fully keyboard-
+            // operable (Enter/Space) and exposes its own expanded/collapsed state to assistive
+            // tech for free, with no extra ARIA wiring needed. Renders every warning, never a
+            // sliced subset — the count in the summary is the real count, not an estimate.
+            <details className="space-y-1">
+              <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+                Warnings ({preview.warnings.length})
+              </summary>
+              <ul className="list-disc space-y-1 pt-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
+                {preview.warnings.map((warning, index) => (
                   <li key={`preview-warning-${index}-${warning}`}>{warning}</li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
 
           {preview.unknown_species.length > 0 && (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Unknown Species</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Unknown Species
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
                 {preview.unknown_species.slice(0, 20).map((name, index) => (
                   <li key={`unknown-species-${index}-${name}`}>{name}</li>
                 ))}
@@ -66,8 +221,10 @@ export default function ImportResultsPanel({
 
           {preview.unknown_suppliers.length > 0 && (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Unknown Suppliers</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                Unknown Suppliers
+              </p>
+              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-900 dark:text-amber-100">
                 {preview.unknown_suppliers.slice(0, 20).map((code, index) => (
                   <li key={`unknown-supplier-${index}-${code}`}>{code}</li>
                 ))}
@@ -81,46 +238,40 @@ export default function ImportResultsPanel({
         </div>
       )}
 
-      {/* Commit result panel */}
-      {commitSummary && (
-        <div className="space-y-2 rounded-md border p-4">
-          <p className="text-sm font-medium">Import Summary</p>
-          <div className="grid gap-2 text-sm md:grid-cols-3">
-            <p>Created: {commitSummary.created}</p>
-            <p>Failed: {commitSummary.failed}</p>
-            <p>Skipped: {commitSummary.skipped}</p>
-          </div>
+      {/* Per-year progress and running totals render here via `yearProgress`/`yearRunningTotals`;
+          `commitSummary` below contributes only the run's aggregated warnings (its `created`/
+          `skipped` are not rendered directly — `yearRunningTotals` already covers that). */}
+      {yearProgress && yearProgress.length > 0 && (
+        <ImportProgressSection yearProgress={yearProgress} yearRunningTotals={yearRunningTotals} />
+      )}
 
-          {commitSummary.warnings.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-amber-700">Import Warnings</p>
-              <ul className="list-disc space-y-1 pl-5 text-xs text-amber-700">
-                {commitSummary.warnings.slice(0, 20).map((warning, index) => (
-                  <li key={`commit-warning-${index}-${warning}`}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+      {commitSummary && commitSummary.warnings.length > 0 && (
+        // Same native disclosure pattern as the preview warnings above — these are the only
+        // record of which global species/suppliers an import auto-created, so every one of them
+        // must stay reachable, never silently capped.
+        <details className="space-y-1 rounded-md border p-4">
+          <summary className="cursor-pointer text-sm font-medium text-amber-900 dark:text-amber-100">
+            Import Warnings ({commitSummary.warnings.length})
+          </summary>
+          <ul className="list-disc space-y-1 pt-2 pl-5 text-xs text-amber-900 dark:text-amber-100">
+            {commitSummary.warnings.map((warning, index) => (
+              <li key={`commit-warning-${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </details>
+      )}
 
-          {commitSummary.failures.length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-destructive text-sm font-medium">Import Failures</p>
-              <ul className="text-destructive list-disc space-y-1 pl-5 text-xs">
-                {commitSummary.failures.slice(0, 20).map((failure, index) => (
-                  <li key={`commit-failure-${index}-${failure}`}>{failure}</li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-sm text-emerald-700" role="status" aria-live="polite">
-              Import completed without shipment failures.
-            </p>
-          )}
-
-          <Button type="button" variant="outline" size="sm" onClick={onReset}>
-            Import another file
-          </Button>
-        </div>
+      {(commitSummary || (yearProgress && yearProgress.length > 0)) && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isImporting}
+          onClick={onReset}
+          className="w-fit"
+        >
+          Import another file
+        </Button>
       )}
     </>
   );

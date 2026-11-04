@@ -112,14 +112,14 @@ Institution ─┬─ Users
 - Platform historical shipment endpoints (SUPERUSER only):
   - `GET /api/platform/institutions/[id]/shipments` — List shipment summary (id, supplier, dates, item count, total received) for an institution.
   - `DELETE /api/platform/institutions/[id]/shipments` — Bulk-delete shipments for an institution. Body: `{ mode: "all" | "year" | "range", year?, from?, to? }`. Returns `{ deleted: number }`.
-  - `POST /api/platform/institutions/[id]/shipments/import/preview` — Parse + validate historical shipment input (no writes).
-  - `POST /api/platform/institutions/[id]/shipments/import/commit` — Commit validated historical shipments with supplier/species resolution rules.
+  - `POST /api/platform/institutions/[id]/shipments/import/preview` — Validate a historical workbook against the strict 13-column contract (no writes); returns structured issues, existing-shipment notices, and the Arrival years found.
+  - `POST /api/platform/institutions/[id]/shipments/import/commit` — Commit one Arrival year of a validated workbook (`{ raw_text, preview_hash, year, options }`) in one atomic transaction, re-validating the entire workbook fresh on every request. See "Historical import: year-by-year atomic commits" below.
   - `GET /api/platform/institutions/[id]/shipments/export?format=xlsx[&from=YYYY-MM-DD][&to=YYYY-MM-DD]` — Export institution shipment history as XLSX, optionally filtered by date range.
 - Tenant historical shipment endpoints (requires `x-tenant-slug` header):
   - `GET /api/tenant/shipments/summary` — List shipment summary for the tenant institution.
   - `DELETE /api/tenant/shipments` — Tenant-scoped bulk-delete shipments (institution admin only). Body: `{ mode: "all" | "year" | "range", year?, from?, to? }`. Returns `{ deleted: number }`.
-  - `POST /api/tenant/shipments/import/preview` — Tenant-scoped parse + validate historical input (no writes).
-  - `POST /api/tenant/shipments/import/commit` — Tenant-scoped commit using preview hash.
+  - `POST /api/tenant/shipments/import/preview` — Tenant-scoped validate against the strict 13-column contract (no writes); force-blocks any unresolved species (tenants can never auto-create).
+  - `POST /api/tenant/shipments/import/commit` — Tenant-scoped, year-scoped atomic commit; force-disables `allow_species_autocreate` server-side regardless of the request body.
   - `GET /api/tenant/shipments/export?format=xlsx[&from=YYYY-MM-DD][&to=YYYY-MM-DD]` — Tenant-scoped XLSX export, optionally filtered by date range.
 - Tenant release endpoints (requires `x-tenant-slug` header):
   - `GET /api/tenant/releases` — Paginated release list with additive `totalReleased` and `totalLosses`.
@@ -127,6 +127,28 @@ Institution ─┬─ Users
   - `POST /api/tenant/shipments/[id]/releases` — Create release; accepts `items` plus create-only `loss_updates` absolute shipment totals.
   - `PATCH /api/tenant/releases/[releaseId]` — Edit release; accepts event-level `items` and event-level `losses`.
   - `DELETE /api/tenant/releases/[releaseId]` — Delete release; rolls back in-flight and release-attributed loss quantities, with underflow protection.
+
+### Historical import: year-by-year atomic commits
+
+A validated historical workbook is committed one Arrival-date year at a time, each in its own
+PostgreSQL transaction, in chronological order. The client never sends a pre-grouped structure: a
+commit request always resends the complete original `raw_text` plus the target `year`, and the
+server re-parses, re-groups, and re-validates the _entire_ workbook from scratch on every single
+request — not only the requested year — before touching the database. This means a blocking issue
+anywhere in the workbook (even in a year not being committed right now) makes every year
+ineligible until it's fixed, on every retry, with no server-held validation state between
+requests.
+
+Each year's transaction is guarded by a PostgreSQL transaction-scoped advisory lock
+(`pg_try_advisory_xact_lock`, keyed by institution id), fails fast (no blocking/waiting) if another
+commit is already running for the same institution, and releases automatically on commit or
+rollback. A failure anywhere inside one year's transaction rolls back everything that year would
+have written — shipments, items, auto-created suppliers/species, and institution-species links —
+while every already-committed earlier year remains untouched. Already-existing shipments are
+skipped by default (not an error), so retrying a year (after a fix, or simply because the previous
+attempt was interrupted) is always safe without any client-side resume token. See
+`docs/api/README.md`'s "Historical shipment import/export contract" for the full request/response
+shapes and `sessions/2026-10-29/` for the implementation history (gitignored, local-only).
 
 ### Backend Architecture
 
