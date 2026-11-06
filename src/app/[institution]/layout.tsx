@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPublicInstitution } from "@/lib/queries/institution";
+import { getInstitutionBySlug } from "@/lib/queries/institution";
 import { InstitutionDataProvider } from "@/components/providers/institution-provider";
 import { readableForeground } from "@/lib/theme-color";
 import type { PublicInstitution } from "@/types/institution";
@@ -12,10 +12,13 @@ interface InstitutionLayoutProps {
 export default async function InstitutionLayout({ children, params }: InstitutionLayoutProps) {
   const { institution: slug } = await params;
 
-  const row = await getPublicInstitution(slug);
+  // Not filtered by public-site visibility: staff of a hidden institution still need
+  // the admin area. Public routes are gated in `(public)/layout.tsx`.
+  const found = await getInstitutionBySlug(slug);
 
-  if (!row) notFound();
+  if (!found) notFound();
 
+  const { public_site_live: _publicSiteLive, ...row } = found;
   const institution: PublicInstitution = {
     ...row,
     social_links: row.social_links as PublicInstitution["social_links"],

@@ -47,7 +47,8 @@ export default async function ButterflyPage({ params }: ButterflyPageProps) {
 
   if (!scientificName) notFound();
 
-  const inst = (await getPublicInstitution(slug))!;
+  const inst = await getPublicInstitution(slug);
+  if (!inst) notFound();
   const species = await getSpeciesDetail(inst.id, scientificName);
 
   if (!species) {

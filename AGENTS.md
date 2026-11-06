@@ -122,7 +122,7 @@ pnpm db:studio      # Open Drizzle Studio GUI
 
 - Path alias: `@/` maps to `/src/`
 - Multi-tenant routing: `[institution]` dynamic segment isolates data per institution
-- Institution validation: `[institution]/layout.tsx` calls `getPublicInstitution(slug)` and triggers `notFound()` if the institution doesn't exist. Child pages can use `(await getPublicInstitution(slug))!` (non-null assertion) since the layout guarantees validity and React `cache()` deduplicates the call. The root `src/app/not-found.tsx` catches the 404.
+- Institution validation: `[institution]/layout.tsx` calls `getPublicInstitution(slug)` and triggers `notFound()` if the institution doesn't exist. The layout uses `getInstitutionBySlug` (ignores `stats_active`) so staff of a hidden institution keep admin access; `(public)/layout.tsx` and public pages use `getPublicInstitution` (filters `stats_active = true`) and call `notFound()` on null. The root `src/app/not-found.tsx` catches the 404.
 - Route groups: `(tenant)` for protected institution routes, `(public)` for public-facing institution routes, `(home)` for root public pages, `(platform)` for superuser platform pages
 - Client components marked with `"use client"`
 - API layer: Routes (validation + HTTP) → Services (auth, permissions, tenant logic) → Queries (DB only). Routes never call queries directly for authenticated resources.
@@ -135,7 +135,7 @@ pnpm db:studio      # Open Drizzle Studio GUI
 
 ## Database Tables
 
-- `institutions` — Multi-tenant organizations (slug, name, optional main_header, full address fields, IABES membership, stats_active flag, theming, contact info, timestamps). `main_header` overrides the default public homepage headline when set.
+- `institutions` — Multi-tenant organizations (slug, name, optional main_header, full address fields, IABES membership, stats_active flag (public-site visibility only; staff keep admin access), theming, contact info, timestamps). `main_header` overrides the default public homepage headline when set.
 - `institution_news` — Institution-specific news entries (institution_id, title, content, is_active, optional image_url, timestamps)
 - `users` — User accounts tied to an institution (name, globally unique email, password_hash, role, institution_id, timestamps)
 - `butterfly_species` — Global master species catalog (scientific_name, common_name, family, sub_family, lifespan_days, range, optional description, host_plant, habitat, fun_facts, timestamps). Imagery lives in the Wingspan microservice, matched on `scientific_name` — the legacy `img_wings_open` / `img_wings_closed` / `extra_img_1` / `extra_img_2` columns still exist but are no longer read or written.
