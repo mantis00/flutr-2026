@@ -5,9 +5,9 @@ export default async function PlatformInstitutionsPage() {
   const raw = await getAllInstitutions();
 
   const institutions = raw.map((i) => {
-    // NOTE: This status is derived from stats visibility, not a separate account suspension field.
-    const statsVisibleOnPublicPages = i.stats_active;
-    const status = statsVisibleOnPublicPages ? ("ACTIVE" as const) : ("SUSPENDED" as const);
+    // Derived from the `stats_active` flag, which controls public-site visibility only.
+    // It does not restrict staff access to the institution's admin area.
+    const status = i.stats_active ? ("LIVE" as const) : ("HIDDEN" as const);
 
     return {
       id: i.id,

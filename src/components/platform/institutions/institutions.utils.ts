@@ -12,7 +12,13 @@ export type Institution = {
 
   created_at: string;
 
-  status: "ACTIVE" | "SUSPENDED";
+  /** Public-site visibility: LIVE = public site live, HIDDEN = public site hidden (staff access unaffected). */
+  status: "LIVE" | "HIDDEN";
+};
+
+export const STATUS_LABEL: Record<Institution["status"], string> = {
+  LIVE: "Public site live",
+  HIDDEN: "Public site hidden",
 };
 
 export function filterInstitutions(

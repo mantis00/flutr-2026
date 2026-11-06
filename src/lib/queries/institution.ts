@@ -5,36 +5,54 @@ import { db } from "@/lib/db";
 import { institutions } from "@/lib/schema";
 import { PlatformCreateInstitutionInput } from "../validation/institution";
 
+const institutionSelect = {
+  id: institutions.id,
+  name: institutions.name,
+  main_header: institutions.main_header,
+  description: institutions.description,
+  street_address: institutions.street_address,
+  extended_address: institutions.extended_address,
+  city: institutions.city,
+  state_province: institutions.state_province,
+  postal_code: institutions.postal_code,
+  country: institutions.country,
+  email_address: institutions.email_address,
+  phone_number: institutions.phone_number,
+  website_url: institutions.website_url,
+  volunteer_url: institutions.volunteer_url,
+  donation_url: institutions.donation_url,
+  logo_url: institutions.logo_url,
+  facility_image_url: institutions.facility_image_url,
+  theme_colors: institutions.theme_colors,
+  social_links: institutions.social_links,
+};
+
 /**
- * Cached institution lookup by slug.
- * React's `cache()` deduplicates calls within a single server request,
- * so the layout and page share the same result without hitting the DB twice.
+ * Cached institution lookup by slug for PUBLIC pages only.
+ * Returns null when the institution is missing or its public site is hidden
+ * (`stats_active = false`). React's `cache()` deduplicates calls within a single
+ * server request, so the layout and page share the same result.
  */
 export const getPublicInstitution = cache(async (slug: string) => {
   const [row] = await db
-    .select({
-      id: institutions.id,
-      name: institutions.name,
-      main_header: institutions.main_header,
-      description: institutions.description,
-      street_address: institutions.street_address,
-      extended_address: institutions.extended_address,
-      city: institutions.city,
-      state_province: institutions.state_province,
-      postal_code: institutions.postal_code,
-      country: institutions.country,
-      email_address: institutions.email_address,
-      phone_number: institutions.phone_number,
-      website_url: institutions.website_url,
-      volunteer_url: institutions.volunteer_url,
-      donation_url: institutions.donation_url,
-      logo_url: institutions.logo_url,
-      facility_image_url: institutions.facility_image_url,
-      theme_colors: institutions.theme_colors,
-      social_links: institutions.social_links,
-    })
+    .select(institutionSelect)
     .from(institutions)
     .where(and(eq(institutions.slug, slug), eq(institutions.stats_active, true)))
+    .limit(1);
+
+  return row ?? null;
+});
+
+/**
+ * Cached institution lookup by slug regardless of public-site visibility.
+ * Used by the shared `[institution]` layout so staff can still reach the admin
+ * area when the public site is hidden. Public routes must gate on `public_site_live`.
+ */
+export const getInstitutionBySlug = cache(async (slug: string) => {
+  const [row] = await db
+    .select({ ...institutionSelect, public_site_live: institutions.stats_active })
+    .from(institutions)
+    .where(eq(institutions.slug, slug))
     .limit(1);
 
   return row ?? null;
