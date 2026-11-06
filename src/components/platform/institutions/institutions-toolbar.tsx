@@ -45,8 +45,8 @@ export default function InstitutionsToolbar({
         variant="outline"
       >
         <ToggleGroupItem value="all">All</ToggleGroupItem>
-        <ToggleGroupItem value="ACTIVE">Active</ToggleGroupItem>
-        <ToggleGroupItem value="SUSPENDED">Suspended</ToggleGroupItem>
+        <ToggleGroupItem value="LIVE">Public site live</ToggleGroupItem>
+        <ToggleGroupItem value="HIDDEN">Public site hidden</ToggleGroupItem>
       </ToggleGroup>
     </div>
   );

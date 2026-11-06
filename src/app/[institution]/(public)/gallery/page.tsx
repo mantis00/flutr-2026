@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { getPublicInstitution } from "@/lib/queries/institution";
@@ -21,7 +22,8 @@ export async function generateMetadata({ params }: GalleryPageProps): Promise<Me
 export default async function GalleryPage({ params }: GalleryPageProps) {
   const { institution: slug } = await params;
 
-  const inst = (await getPublicInstitution(slug))!;
+  const inst = await getPublicInstitution(slug);
+  if (!inst) notFound();
 
   const [{ species }, globalSpecies] = await Promise.all([
     getGalleryData(inst.id),

@@ -846,9 +846,11 @@ export default function InstitutionProfileTab({
                   render={({ field }) => (
                     <FormItem className="flex items-center justify-between rounded-lg border p-4">
                       <div className="space-y-0.5">
-                        <FormLabel>Active on public stats</FormLabel>
+                        <FormLabel>Public site live</FormLabel>
                         <FormDescription>
-                          Show this institution on the public statistics page
+                          When off, the public site (home, gallery, statistics, contact) is hidden
+                          and returns not found. Staff can still sign in and manage this
+                          institution.
                         </FormDescription>
                       </div>
                       <FormControl>

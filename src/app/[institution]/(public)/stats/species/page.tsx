@@ -23,7 +23,8 @@ export async function generateMetadata({ params }: SpeciesTreemapPageProps): Pro
 export default async function SpeciesTreemapPage({ params }: SpeciesTreemapPageProps) {
   const { institution: slug } = await params;
 
-  const inst = (await getPublicInstitution(slug))!;
+  const inst = await getPublicInstitution(slug);
+  if (!inst) notFound();
 
   const rows = await attachImages(await getStatsData(inst.id));
   const stats = transformStatsData(rows);
