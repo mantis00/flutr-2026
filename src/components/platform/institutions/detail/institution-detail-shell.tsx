@@ -50,6 +50,7 @@ export interface InstitutionDetail {
   theme_colors: string[] | null;
   stats_active: boolean;
   iabes_member: boolean;
+  track_parasite_details: boolean;
 }
 
 export interface InstitutionUser {

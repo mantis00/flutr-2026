@@ -41,6 +41,12 @@ export async function GET(request: NextRequest) {
 
     return ok(result);
   } catch (error) {
+    if (error instanceof Error && error.message === "PARASITE_DETAILS_REQUIRED") {
+      return invalidRequest(
+        "Classify each parasitized butterfly when parasite tracking is enabled",
+      );
+    }
+
     if (error instanceof Error) {
       if (error.message === "UNAUTHORIZED") return unauthorized();
       if (error.message === "FORBIDDEN") return forbidden();

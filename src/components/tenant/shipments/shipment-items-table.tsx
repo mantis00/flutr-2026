@@ -37,6 +37,7 @@ import {
   formatReleasedQuantity,
   type ShipmentItemRow,
 } from "./types";
+import type { ParasiteType } from "@/lib/parasite-details";
 
 type LossField =
   | "emergedInTransit"
@@ -63,6 +64,12 @@ const METRIC_COLUMNS: MetricColumn[] = [
   { key: "nonEmergence", label: "Non-emergence", short: "Non-emerg" },
   { key: "poorEmergence", label: "Poor emergence", short: "Poor-emerg" },
 ];
+
+const PARASITE_TYPE_LABELS: Record<ParasiteType, string> = {
+  wasp: "Wasp",
+  fly: "Fly",
+  other: "Other",
+};
 
 /**
  * Loss columns that must satisfy
@@ -220,7 +227,22 @@ export function ShipmentItemsTable({
                           onChange={(next) => onMetricChange?.(item.id, col.key, next)}
                         />
                       ) : (
-                        <span className="text-sm">{item[col.key]}</span>
+                        <div className="text-sm">
+                          <span>{item[col.key]}</span>
+                          {col.key === "parasite" && !editing && (
+                            <ul className="text-muted-foreground mt-1 space-y-0.5 text-left text-xs">
+                              {(item.parasiteDetails ?? []).map((detail) => (
+                                <li key={detail.type}>
+                                  {PARASITE_TYPE_LABELS[detail.type]}: {detail.count}
+                                  {detail.description ? ` — ${detail.description}` : ""}
+                                </li>
+                              ))}
+                              {!!item.parasiteUnclassified && (
+                                <li>Unclassified: {item.parasiteUnclassified}</li>
+                              )}
+                            </ul>
+                          )}
+                        </div>
                       )}
                     </TableCell>
                   ))}

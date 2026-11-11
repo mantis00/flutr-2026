@@ -93,6 +93,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     return ok({ updated: true });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === SHIPMENT_ERRORS.PARASITE_DETAILS_REQUIRED ||
+        error.message === SHIPMENT_ERRORS.INVALID_PARASITE_DETAILS)
+    ) {
+      return invalidRequest("Parasite counts must match their classified and unclassified details");
+    }
+
     if (error instanceof Error && error.message === SHIPMENT_ERRORS.CANNOT_DELETE_ITEM_IN_FLIGHT) {
       return conflict("Cannot delete a shipment item that has in-flight records");
     }

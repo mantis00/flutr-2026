@@ -85,6 +85,7 @@ const profileFormSchema = z.object({
   // Platform flags
   stats_active: z.boolean(),
   iabes_member: z.boolean(),
+  track_parasite_details: z.boolean(),
 });
 
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
@@ -134,6 +135,7 @@ function defaultsFor(institution: InstitutionDetail): ProfileFormValues {
     social_youtube: institution.social_links?.youtube ?? "",
     stats_active: institution.stats_active,
     iabes_member: institution.iabes_member,
+    track_parasite_details: institution.track_parasite_details,
   };
 }
 
@@ -877,6 +879,32 @@ export default function InstitutionProfileTab({
             </section>
           </>
         )}
+
+        <Separator />
+
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold">Shipment tracking</h2>
+          <fieldset disabled={readOnly}>
+            <FormField
+              control={form.control}
+              name="track_parasite_details"
+              render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-lg border p-4">
+                  <div className="space-y-0.5">
+                    <FormLabel>Track parasite types</FormLabel>
+                    <FormDescription>
+                      Prompt for wasp, fly, or other and a description when recording parasitized
+                      butterflies.
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+          </fieldset>
+        </section>
 
         {/* The action bar sticks to the bottom of the scroll area so the form
             never has to be scrolled to the end to save. `-mx-6` bleeds past

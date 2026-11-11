@@ -27,6 +27,11 @@ import {
 import { ShipmentItemsTable } from "@/components/tenant/shipments/shipment-items-table";
 import { SpeciesPickerDialog } from "@/components/tenant/shipments/species-picker-dialog";
 import {
+  ParasiteDetailsDialog,
+  type ParasitePromptItem,
+} from "@/components/tenant/shipments/parasite-details-dialog";
+import type { ParasiteDetail } from "@/lib/parasite-details";
+import {
   Table,
   TableBody,
   TableCell,
@@ -93,6 +98,10 @@ export default function ShipmentDetailPage() {
   const [editing, setEditing] = useState(false);
   const [draftItems, setDraftItems] = useState<ShipmentItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [trackParasiteDetails, setTrackParasiteDetails] = useState(true);
+  const [parasitePromptItems, setParasitePromptItems] = useState<ParasitePromptItem[]>([]);
+  const [parasitePromptOpen, setParasitePromptOpen] = useState(false);
+  const [parasitePromptKey, setParasitePromptKey] = useState(0);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -118,21 +127,32 @@ export default function ShipmentDetailPage() {
         // Fetch the shipment + its release history in parallel. The release
         // endpoint already returns totalReleased per event so the history table
         // can render without an extra round-trip.
-        const [detailResponse, releasesResponse] = await Promise.all([
+        const [detailResponse, releasesResponse, institutionResponse] = await Promise.all([
           fetch(`/api/tenant/shipments/${shipmentId}`, { headers: tenantHeaders, signal }),
           fetch(`/api/tenant/shipments/${shipmentId}/releases`, {
             headers: tenantHeaders,
             signal,
           }),
+          fetch("/api/tenant/institution", { headers: tenantHeaders, signal }),
         ]);
 
         const detailResult = await detailResponse.json().catch(() => null);
+        const institutionResult = await institutionResponse.json().catch(() => null);
         if (signal?.aborted) return;
         if (!detailResponse.ok) {
           setStatus("error");
           setErrorMessage(detailResult?.error?.message ?? "Failed to load shipment.");
           return;
         }
+        if (
+          !institutionResponse.ok ||
+          typeof institutionResult?.institution?.track_parasite_details !== "boolean"
+        ) {
+          setStatus("error");
+          setErrorMessage("Failed to load institution settings.");
+          return;
+        }
+        setTrackParasiteDetails(institutionResult.institution.track_parasite_details);
         setData(detailResult);
         setDraftItems(detailResult.items ?? []);
 
@@ -284,6 +304,8 @@ export default function ShipmentDetailPage() {
             damagedInTransit: 0,
             diseasedInTransit: 0,
             parasite: 0,
+            parasiteDetails: [],
+            parasiteUnclassified: 0,
             nonEmergence: 0,
             poorEmergence: 0,
             inFlightQuantity: 0,
@@ -304,7 +326,7 @@ export default function ShipmentDetailPage() {
     setDraftItems((current) => current.filter((item) => item.id !== itemId));
   }, []);
 
-  const handleSave = async () => {
+  const saveChanges = async (detailsByItemId: Record<number, ParasiteDetail[]> = {}) => {
     if (!data) return;
 
     const original = new Map(data.items.map((item) => [item.id, item]));
@@ -321,16 +343,30 @@ export default function ShipmentDetailPage() {
         if (!orig) return false;
         return (Object.keys(METRIC_TO_API) as MetricKey[]).some((k) => orig[k] !== draft[k]);
       })
-      .map((draft) => ({
-        id: draft.id,
-        number_received: draft.numberReceived,
-        emerged_in_transit: draft.emergedInTransit,
-        damaged_in_transit: draft.damagedInTransit,
-        diseased_in_transit: draft.diseasedInTransit,
-        parasite: draft.parasite,
-        non_emergence: draft.nonEmergence,
-        poor_emergence: draft.poorEmergence,
-      }));
+      .map((draft) => {
+        const parasiteChanged =
+          original.get(draft.id)?.parasite !== undefined &&
+          original.get(draft.id)?.parasite !== draft.parasite;
+        const parasiteDetails =
+          detailsByItemId[draft.id] ??
+          (parasiteChanged && draft.parasite === 0 ? [] : (draft.parasiteDetails ?? []));
+        return {
+          id: draft.id,
+          number_received: draft.numberReceived,
+          emerged_in_transit: draft.emergedInTransit,
+          damaged_in_transit: draft.damagedInTransit,
+          diseased_in_transit: draft.diseasedInTransit,
+          parasite: draft.parasite,
+          parasite_details: parasiteDetails,
+          parasite_unclassified:
+            detailsByItemId[draft.id] !== undefined || parasiteChanged
+              ? draft.parasite - parasiteDetails.reduce((sum, detail) => sum + detail.count, 0)
+              : (draft.parasiteUnclassified ??
+                draft.parasite - parasiteDetails.reduce((sum, detail) => sum + detail.count, 0)),
+          non_emergence: draft.nonEmergence,
+          poor_emergence: draft.poorEmergence,
+        };
+      });
 
     const addItems = draftItems
       .filter((draft) => draft.id <= 0)
@@ -341,6 +377,9 @@ export default function ShipmentDetailPage() {
         damaged_in_transit: draft.damagedInTransit,
         diseased_in_transit: draft.diseasedInTransit,
         parasite: draft.parasite,
+        ...(detailsByItemId[draft.id] !== undefined
+          ? { parasite_details: detailsByItemId[draft.id] }
+          : {}),
         non_emergence: draft.nonEmergence,
         poor_emergence: draft.poorEmergence,
       }));
@@ -378,12 +417,42 @@ export default function ShipmentDetailPage() {
       }
       setEditing(false);
       tempIdCounter.current = 0;
+      setParasitePromptOpen(false);
       await loadShipment();
       // loadShipment without a signal is fine here — the post-save reload
       // is short-lived and intentionally outlives the original effect.
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (!data) return;
+
+    if (trackParasiteDetails) {
+      const original = new Map(data.items.map((item) => [item.id, item]));
+      const itemsToClassify = draftItems
+        .filter((draft) => {
+          if (draft.parasite <= 0) return false;
+          const previous = original.get(draft.id);
+          return !previous || previous.parasite !== draft.parasite;
+        })
+        .map((item) => ({
+          id: item.id,
+          name: item.commonName,
+          parasite: item.parasite,
+          details: item.parasiteDetails ?? [],
+        }));
+
+      if (itemsToClassify.length > 0) {
+        setParasitePromptItems(itemsToClassify);
+        setParasitePromptKey((key) => key + 1);
+        setParasitePromptOpen(true);
+        return;
+      }
+    }
+
+    await saveChanges();
   };
 
   const confirmDelete = async (event: MouseEvent<HTMLButtonElement>) => {
@@ -649,6 +718,16 @@ export default function ShipmentDetailPage() {
         species={species}
         excludeIds={draftItems.map((item) => item.butterflySpeciesId)}
         onConfirm={handlePickerConfirm}
+      />
+
+      <ParasiteDetailsDialog
+        key={parasitePromptKey}
+        open={parasitePromptOpen}
+        items={parasitePromptItems}
+        onOpenChange={setParasitePromptOpen}
+        submitting={saving}
+        errorMessage={errorMessage}
+        onConfirm={(detailsByItemId) => void saveChanges(detailsByItemId)}
       />
     </div>
   );

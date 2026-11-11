@@ -73,6 +73,7 @@ export default async function OrganizationPage({ params, searchParams }: Props) 
     theme_colors: row.theme_colors ?? null,
     stats_active: row.stats_active,
     iabes_member: row.iabes_member,
+    track_parasite_details: row.track_parasite_details,
   };
 
   const users: InstitutionUser[] = rawUsers.map((u) => ({

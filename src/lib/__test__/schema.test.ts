@@ -43,6 +43,7 @@ describe("schema", () => {
       expect(columns).toContain("country");
       expect(columns).toContain("iabes_member");
       expect(columns).toContain("stats_active");
+      expect(columns).toContain("track_parasite_details");
       expect(columns).toContain("created_at");
       expect(columns).toContain("updated_at");
     });
@@ -181,6 +182,8 @@ describe("schema", () => {
       expect(columns).toContain("damaged_in_transit");
       expect(columns).toContain("diseased_in_transit");
       expect(columns).toContain("parasite");
+      expect(columns).toContain("parasite_unclassified");
+      expect(columns).toContain("parasite_details");
       expect(columns).toContain("non_emergence");
       expect(columns).toContain("poor_emergence");
       expect(columns).toContain("created_at");

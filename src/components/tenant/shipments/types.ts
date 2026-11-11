@@ -6,6 +6,7 @@
  */
 
 import type { SpeciesImage } from "@/lib/wingspan/images";
+import type { ParasiteDetail } from "@/lib/parasite-details";
 
 export type SpeciesPickerOption = {
   id: number;
@@ -36,6 +37,8 @@ export type ShipmentItemRow = {
   damagedInTransit: number;
   diseasedInTransit: number;
   parasite: number;
+  parasiteDetails?: ParasiteDetail[];
+  parasiteUnclassified?: number;
   nonEmergence: number;
   poorEmergence: number;
   /**

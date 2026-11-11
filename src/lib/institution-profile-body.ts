@@ -35,6 +35,7 @@ export interface ProfileBodyValues {
   social_youtube?: string;
   stats_active: boolean;
   iabes_member: boolean;
+  track_parasite_details: boolean;
 }
 
 /** React Hook Form's `dirtyFields` — only edited keys are present and true. */
@@ -118,5 +119,8 @@ export function buildProfileUpdateBody(
           ...edited("iabes_member", { iabes_member: values.iabes_member }),
         }
       : {}),
+    ...edited("track_parasite_details", {
+      track_parasite_details: values.track_parasite_details,
+    }),
   };
 }

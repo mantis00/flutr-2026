@@ -27,6 +27,7 @@ const values: ProfileBodyValues = {
   social_youtube: "",
   stats_active: true,
   iabes_member: false,
+  track_parasite_details: true,
 };
 
 const platform = { isTenant: false };
@@ -86,12 +87,21 @@ describe("buildProfileUpdateBody", () => {
 
   it("omits slug and platform flags for tenants", () => {
     const body = buildProfileUpdateBody(
-      values,
-      { slug: true, stats_active: true, iabes_member: true, city: true },
+      { ...values, track_parasite_details: false },
+      {
+        slug: true,
+        stats_active: true,
+        iabes_member: true,
+        track_parasite_details: true,
+        city: true,
+      },
       { isTenant: true },
     );
 
-    expect(body).toEqual({ city: "Westminster" });
+    expect(body).toEqual({
+      city: "Westminster",
+      track_parasite_details: false,
+    });
   });
 
   it("sends optional urls only when edited", () => {

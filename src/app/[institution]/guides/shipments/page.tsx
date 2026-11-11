@@ -112,6 +112,14 @@ export default async function ShipmentsGuidePage({
             Leave a loss box at zero if it doesn&apos;t apply. Click <strong>Save shipment</strong>{" "}
             when the whole delivery is entered.
           </p>
+          <p>
+            If parasite tracking is enabled in your <strong>Organization</strong> settings, saving
+            opens a classification step for any species with a parasite count. Use the{" "}
+            <strong>+</strong> and <strong>−</strong> buttons to split that count between wasps,
+            flies, and other; the total must match before the shipment is saved. Add a description
+            for Other. The saved classification and description appear under Parasite on the
+            shipment detail page.
+          </p>
         </GuideStep>
 
         <GuideStep

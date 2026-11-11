@@ -9,6 +9,8 @@ import {
 } from "@/lib/authz";
 import { resolveTenantBySlug } from "@/lib/tenant";
 import { attachImagesCamel } from "@/lib/wingspan/client";
+import { getTenantInstitution } from "@/lib/queries/institution";
+import { sumParasiteDetails } from "@/lib/parasite-details";
 import {
   listShipments,
   createShipment,
@@ -71,6 +73,16 @@ export async function createTenantShipment(data: CreateTenantShipmentInput) {
 
   const { slug, ...shipmentData } = data;
   const tenantId = await resolveTenantBySlug(user, slug);
+  const institution = await getTenantInstitution(tenantId);
+
+  if (
+    institution?.track_parasite_details &&
+    shipmentData.items.some(
+      (item) => item.parasite !== sumParasiteDetails(item.parasite_details ?? []),
+    )
+  ) {
+    throw new Error(SHIPMENT_ERRORS.PARASITE_DETAILS_REQUIRED);
+  }
 
   return createShipment(tenantId, shipmentData);
 }
@@ -95,8 +107,18 @@ export async function updateTenantShipment(data: UpdateTenantShipmentInput) {
 
   const { slug, id, ...shipmentData } = data;
   const tenantId = await resolveTenantBySlug(user, slug);
+  const institution = await getTenantInstitution(tenantId);
 
-  return updateShipment(tenantId, id, shipmentData);
+  if (
+    institution?.track_parasite_details &&
+    shipmentData.add_items?.some(
+      (item) => item.parasite !== sumParasiteDetails(item.parasite_details ?? []),
+    )
+  ) {
+    throw new Error(SHIPMENT_ERRORS.PARASITE_DETAILS_REQUIRED);
+  }
+
+  return updateShipment(tenantId, id, shipmentData, institution?.track_parasite_details ?? false);
 }
 
 export async function deleteTenantShipment({ slug, id }: TenantShipmentIdInput) {

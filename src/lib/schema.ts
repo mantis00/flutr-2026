@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { SpeciesFunFact } from "@/types/butterfly";
+import type { ParasiteDetail } from "@/lib/parasite-details";
 
 /**
  * Flutr V2 Schema
@@ -75,6 +76,7 @@ export const institutions = pgTable("institutions", {
   description: text("description"),
   social_links: jsonb("social_links"),
   stats_active: boolean("stats_active").notNull().default(true),
+  track_parasite_details: boolean("track_parasite_details").notNull().default(true),
 
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at").defaultNow().notNull(),
@@ -338,6 +340,8 @@ export const shipment_items = pgTable(
     damaged_in_transit: integer("damaged_in_transit").notNull().default(0),
     diseased_in_transit: integer("diseased_in_transit").notNull().default(0),
     parasite: integer("parasite").notNull().default(0),
+    parasite_unclassified: integer("parasite_unclassified").notNull().default(0),
+    parasite_details: jsonb("parasite_details").$type<ParasiteDetail[]>().notNull().default([]),
     non_emergence: integer("non_emergence").notNull().default(0),
     poor_emergence: integer("poor_emergence").notNull().default(0),
     good_emergence: integer("good_emergence").default(0),
@@ -355,6 +359,10 @@ export const shipment_items = pgTable(
     ck_shipment_items_good_emergence_nonnegative: check(
       "ck_shipment_items_good_emergence_nonnegative",
       sql`${table.good_emergence} >= 0`,
+    ),
+    ck_shipment_items_parasite_unclassified_nonnegative: check(
+      "ck_shipment_items_parasite_unclassified_nonnegative",
+      sql`${table.parasite_unclassified} >= 0`,
     ),
 
     // Lookup shipment items by institution + species (gallery/home aggregation)

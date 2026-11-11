@@ -33,12 +33,17 @@ import { ROUTES } from "@/lib/routes";
 import { DatePicker } from "@/components/shared/date-picker";
 import { SpeciesPickerDialog } from "@/components/tenant/shipments/species-picker-dialog";
 import {
+  ParasiteDetailsDialog,
+  type ParasitePromptItem,
+} from "@/components/tenant/shipments/parasite-details-dialog";
+import {
   SupplierSelect,
   mapSupplierRowsToOptions,
   type SupplierOption,
 } from "@/components/tenant/shipments/supplier-select";
 import type { SpeciesPickerOption } from "@/components/tenant/shipments/types";
 import type { SpeciesImage } from "@/lib/wingspan/images";
+import type { ParasiteDetail } from "@/lib/parasite-details";
 
 type ShipmentItemForm = {
   butterfly_species_id: number;
@@ -50,6 +55,7 @@ type ShipmentItemForm = {
   damaged_in_transit: number;
   diseased_in_transit: number;
   parasite: number;
+  parasite_details?: ParasiteDetail[];
   non_emergence: number;
   poor_emergence: number;
 };
@@ -124,6 +130,11 @@ export default function AddShipmentPage() {
   // arrive on-site. The user can still pick a different date if needed.
   const [arrivalDate, setArrivalDate] = useState(() => todayYmd());
   const [items, setItems] = useState<ShipmentItemForm[]>([]);
+  const [trackParasiteDetails, setTrackParasiteDetails] = useState(true);
+  const [formDataReady, setFormDataReady] = useState(false);
+  const [parasitePromptItems, setParasitePromptItems] = useState<ParasitePromptItem[]>([]);
+  const [parasitePromptOpen, setParasitePromptOpen] = useState(false);
+  const [parasitePromptKey, setParasitePromptKey] = useState(0);
 
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [species, setSpecies] = useState<SpeciesPickerOption[]>([]);
@@ -142,9 +153,10 @@ export default function AddShipmentPage() {
     const ac = new AbortController();
     void (async () => {
       try {
-        const [supRes, spRes] = await Promise.all([
+        const [supRes, spRes, institutionRes] = await Promise.all([
           fetch("/api/tenant/suppliers", { headers: tenantHeaders, signal: ac.signal }),
           fetch("/api/tenant/species", { headers: tenantHeaders, signal: ac.signal }),
+          fetch("/api/tenant/institution", { headers: tenantHeaders, signal: ac.signal }),
         ]);
 
         if (!supRes.ok) {
@@ -153,9 +165,19 @@ export default function AddShipmentPage() {
         if (!spRes.ok) {
           throw new Error("Unable to load species.");
         }
+        if (!institutionRes.ok) {
+          throw new Error("Unable to load institution settings.");
+        }
 
-        const supJson = await supRes.json().catch(() => null);
-        const spJson = await spRes.json().catch(() => null);
+        const [supJson, spJson, institutionJson] = await Promise.all([
+          supRes.json(),
+          spRes.json(),
+          institutionRes.json(),
+        ]);
+        if (typeof institutionJson?.institution?.track_parasite_details !== "boolean") {
+          throw new Error("Unable to load parasite tracking setting.");
+        }
+        setTrackParasiteDetails(institutionJson.institution.track_parasite_details);
 
         const supplierRows = Array.isArray(supJson?.suppliers)
           ? supJson.suppliers
@@ -192,6 +214,7 @@ export default function AddShipmentPage() {
             )
             .filter((row: SpeciesPickerOption | null): row is SpeciesPickerOption => row !== null),
         );
+        setFormDataReady(true);
       } catch (err) {
         if (ac.signal.aborted) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -301,6 +324,46 @@ export default function AddShipmentPage() {
     if (code) setFieldErrors((prev) => ({ ...prev, supplier: false }));
   }, []);
 
+  const saveShipment = async (detailsByItemId: Record<number, ParasiteDetail[]> = {}) => {
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch("/api/tenant/shipments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...tenantHeaders },
+        body: JSON.stringify({
+          supplier_code: supplierCode,
+          shipment_date: shipmentDate,
+          arrival_date: arrivalDate,
+          items: items.map((item) => ({
+            butterfly_species_id: item.butterfly_species_id,
+            number_received: item.number_received,
+            emerged_in_transit: item.emerged_in_transit,
+            damaged_in_transit: item.damaged_in_transit,
+            diseased_in_transit: item.diseased_in_transit,
+            parasite: item.parasite,
+            ...(detailsByItemId[item.butterfly_species_id] !== undefined
+              ? { parasite_details: detailsByItemId[item.butterfly_species_id] }
+              : {}),
+            non_emergence: item.non_emergence,
+            poor_emergence: item.poor_emergence,
+          })),
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        setErrorMessage(result?.error?.message ?? "Unable to create shipment.");
+        return;
+      }
+      setParasitePromptOpen(false);
+      router.push(ROUTES.tenant.shipmentById(slug, result.id));
+    } catch {
+      setErrorMessage("Unable to create shipment.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setErrorMessage(null);
@@ -313,49 +376,25 @@ export default function AddShipmentPage() {
     }
     setFieldErrors(EMPTY_FIELD_ERRORS);
 
-    setSubmitting(true);
-    try {
-      const response = await fetch("/api/tenant/shipments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...tenantHeaders },
-        body: JSON.stringify({
-          supplier_code: supplierCode,
-          shipment_date: shipmentDate,
-          arrival_date: arrivalDate,
-          items: items.map(
-            ({
-              butterfly_species_id,
-              number_received,
-              emerged_in_transit,
-              damaged_in_transit,
-              diseased_in_transit,
-              parasite,
-              non_emergence,
-              poor_emergence,
-            }) => ({
-              butterfly_species_id,
-              number_received,
-              emerged_in_transit,
-              damaged_in_transit,
-              diseased_in_transit,
-              parasite,
-              non_emergence,
-              poor_emergence,
-            }),
-          ),
-        }),
-      });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        setErrorMessage(result?.error?.message ?? "Unable to create shipment.");
-        return;
-      }
-      router.push(ROUTES.tenant.shipmentById(slug, result.id));
-    } catch {
-      setErrorMessage("Unable to create shipment.");
-    } finally {
-      setSubmitting(false);
+    const itemsToClassify = trackParasiteDetails
+      ? items
+          .filter((item) => item.parasite > 0)
+          .map((item) => ({
+            id: item.butterfly_species_id,
+            name: item.common_name,
+            parasite: item.parasite,
+            details: item.parasite_details ?? [],
+          }))
+      : [];
+
+    if (itemsToClassify.length > 0) {
+      setParasitePromptItems(itemsToClassify);
+      setParasitePromptKey((key) => key + 1);
+      setParasitePromptOpen(true);
+      return;
     }
+
+    await saveShipment();
   };
 
   return (
@@ -440,7 +479,7 @@ export default function AddShipmentPage() {
                 Add species and record received quantities and any losses.
               </CardDescription>
             </div>
-            <Button type="button" onClick={() => setPickerOpen(true)}>
+            <Button type="button" onClick={() => setPickerOpen(true)} disabled={!formDataReady}>
               Add butterflies
             </Button>
           </CardHeader>
@@ -533,8 +572,8 @@ export default function AddShipmentPage() {
             ) : (
               <span />
             )}
-            <Button type="submit" disabled={submitting}>
-              {submitting ? "Saving…" : "Save shipment"}
+            <Button type="submit" disabled={submitting || !formDataReady}>
+              {submitting ? "Saving…" : formDataReady ? "Save shipment" : "Loading…"}
             </Button>
           </CardFooter>
         </Card>
@@ -546,6 +585,16 @@ export default function AddShipmentPage() {
         species={species}
         excludeIds={addedSpeciesIds}
         onConfirm={handlePickerConfirm}
+      />
+
+      <ParasiteDetailsDialog
+        key={parasitePromptKey}
+        open={parasitePromptOpen}
+        items={parasitePromptItems}
+        onOpenChange={setParasitePromptOpen}
+        submitting={submitting}
+        errorMessage={errorMessage}
+        onConfirm={(detailsByItemId) => void saveShipment(detailsByItemId)}
       />
 
       <AlertDialog

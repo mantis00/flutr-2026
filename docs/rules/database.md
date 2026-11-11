@@ -24,6 +24,7 @@
 - Foreign keys use a mix of `CASCADE` and `RESTRICT`; verify behavior per relationship
 - The `butterfly_species` table is global; `butterfly_species_institution` is per-tenant
 - The `suppliers` table is global; shipments preserve historical supplier codes in `supplier_code`
+- `shipment_items.parasite` remains the aggregate loss count. Keep `parasite_details` counts plus `parasite_unclassified` equal to it; backfill existing/imported counts as unclassified instead of inventing a type.
 
 ## Tenant Composite-Key Enforcement
 

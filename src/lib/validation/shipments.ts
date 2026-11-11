@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { dateOnlyToUtcDate, extractDateOnly } from "@/lib/date-only";
+import { PARASITE_TYPES, sumParasiteDetails, type ParasiteType } from "@/lib/parasite-details";
+import { sanitizeText } from "@/lib/validation/sanitize";
 import { paginatedQuerySchema } from "./pagination";
 
 /**
@@ -40,9 +42,57 @@ type ShipmentItemAccountingInput = {
   damaged_in_transit: number;
   diseased_in_transit: number;
   parasite: number;
+  parasite_details?: {
+    type: ParasiteType;
+    count: number;
+    description?: string | null;
+  }[];
+  parasite_unclassified?: number;
   non_emergence: number;
   poor_emergence: number;
 };
+
+const parasiteDetailSchema = z
+  .object({
+    type: z.enum(PARASITE_TYPES),
+    count: z.number().int().positive(),
+    description: z.string().max(500).transform(sanitizeText).nullable().optional(),
+  })
+  .strict()
+  .superRefine((detail, ctx) => {
+    if (detail.type === "other" && !detail.description?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A description is required for Other",
+        path: ["description"],
+      });
+    }
+  });
+
+function validateParasiteDetails(item: ShipmentItemAccountingInput, ctx: z.RefinementCtx): void {
+  const details = item.parasite_details ?? [];
+  const types = new Set<string>();
+
+  for (const [index, detail] of details.entries()) {
+    if (types.has(detail.type)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Each parasite type may only be listed once",
+        path: ["parasite_details", index, "type"],
+      });
+    }
+    types.add(detail.type);
+  }
+
+  const unclassified = item.parasite_unclassified ?? 0;
+  if (sumParasiteDetails(details) + unclassified !== item.parasite) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Parasite count must equal the classified and unclassified counts",
+      path: ["parasite"],
+    });
+  }
+}
 
 function validateLossesWithinReceived(
   item: ShipmentItemAccountingInput,
@@ -63,6 +113,10 @@ function validateLossesWithinReceived(
       path: [],
     });
   }
+
+  if (item.parasite_details !== undefined || item.parasite_unclassified !== undefined) {
+    validateParasiteDetails(item, ctx);
+  }
 }
 
 // Deliberately has no `good_emergence` field: this schema validates untrusted input for the
@@ -80,6 +134,7 @@ const shipmentItemCreateSchema = z
     damaged_in_transit: z.number().int().min(0).default(0),
     diseased_in_transit: z.number().int().min(0).default(0),
     parasite: z.number().int().min(0).default(0),
+    parasite_details: z.array(parasiteDetailSchema).max(PARASITE_TYPES.length).optional(),
     non_emergence: z.number().int().min(0).default(0),
     poor_emergence: z.number().int().min(0).default(0),
   })
@@ -150,11 +205,22 @@ const shipmentItemUpdateSchema = z
     damaged_in_transit: z.number().int().min(0),
     diseased_in_transit: z.number().int().min(0),
     parasite: z.number().int().min(0),
+    parasite_unclassified: z.number().int().min(0).optional(),
+    parasite_details: z.array(parasiteDetailSchema).max(PARASITE_TYPES.length).optional(),
     non_emergence: z.number().int().min(0),
     poor_emergence: z.number().int().min(0),
   })
   .strict()
-  .superRefine(validateLossesWithinReceived);
+  .superRefine((item, ctx) => {
+    validateLossesWithinReceived(item, ctx);
+    if (item.parasite_details !== undefined && item.parasite_unclassified === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Unclassified parasite count is required with parasite details",
+        path: ["parasite_unclassified"],
+      });
+    }
+  });
 
 /**
  * ---------------------------

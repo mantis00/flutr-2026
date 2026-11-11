@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { db, type DbExecutor } from "@/lib/db";
 import { dateOnlyToUtcDate } from "@/lib/date-only";
+import { sumParasiteDetails, type ParasiteDetail } from "@/lib/parasite-details";
 import {
   shipments,
   shipment_items,
@@ -34,6 +35,8 @@ export const SHIPMENT_ERRORS = {
   GOOD_EMERGENCE_EXCEEDS_AVAILABLE: "GOOD_EMERGENCE_EXCEEDS_AVAILABLE",
   INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
   SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
+  PARASITE_DETAILS_REQUIRED: "PARASITE_DETAILS_REQUIRED",
+  INVALID_PARASITE_DETAILS: "INVALID_PARASITE_DETAILS",
 } as const;
 
 /**
@@ -310,6 +313,8 @@ export async function createShipment(
       damaged_in_transit: item.damaged_in_transit,
       diseased_in_transit: item.diseased_in_transit,
       parasite: item.parasite,
+      parasite_details: item.parasite_details ?? [],
+      parasite_unclassified: item.parasite - sumParasiteDetails(item.parasite_details ?? []),
       non_emergence: item.non_emergence,
       poor_emergence: item.poor_emergence,
       // Never `item.good_emergence ?? 0` — `??` treats an explicit `null` (historically
@@ -446,6 +451,8 @@ export async function listShipmentExportRows(
       damagedInTransit: shipment_items.damaged_in_transit,
       diseasedInTransit: shipment_items.diseased_in_transit,
       parasite: shipment_items.parasite,
+      parasiteDetails: shipment_items.parasite_details,
+      parasiteUnclassified: shipment_items.parasite_unclassified,
       nonEmergence: shipment_items.non_emergence,
       poorEmergence: shipment_items.poor_emergence,
       // Not yet read by the exporter service/workbook (later phase) — selected now so the
@@ -476,6 +483,7 @@ export async function updateShipment(
   institutionId: number,
   shipmentId: number,
   payload: UpdateShipmentBody,
+  trackParasiteDetails = false,
 ) {
   return db.transaction(async (tx) => {
     // Determine whether the shipment header exists up front so the route can
@@ -508,6 +516,8 @@ export async function updateShipment(
           .select({
             id: shipment_items.id,
             goodEmergence: shipment_items.good_emergence,
+            parasite: shipment_items.parasite,
+            parasiteDetails: shipment_items.parasite_details,
           })
           .from(shipment_items)
           .where(
@@ -535,6 +545,25 @@ export async function updateShipment(
 
         const inFlightTotal = inFlightRow?.total ?? 0;
         const goodEmergence = lockedRows[0].goodEmergence;
+        const existingDetails = (lockedRows[0].parasiteDetails ?? []) as ParasiteDetail[];
+        const parasiteDetails = item.parasite_details ?? existingDetails;
+        const parasiteUnclassified =
+          item.parasite_unclassified ?? item.parasite - sumParasiteDetails(parasiteDetails);
+
+        if (
+          trackParasiteDetails &&
+          item.parasite !== lockedRows[0].parasite &&
+          (item.parasite_details === undefined || parasiteUnclassified !== 0)
+        ) {
+          throw new Error(SHIPMENT_ERRORS.PARASITE_DETAILS_REQUIRED);
+        }
+
+        if (
+          parasiteUnclassified < 0 ||
+          parasiteUnclassified + sumParasiteDetails(parasiteDetails) !== item.parasite
+        ) {
+          throw new Error(SHIPMENT_ERRORS.INVALID_PARASITE_DETAILS);
+        }
 
         const availableAfterUpdate =
           item.number_received -
@@ -561,6 +590,8 @@ export async function updateShipment(
             damaged_in_transit: item.damaged_in_transit,
             diseased_in_transit: item.diseased_in_transit,
             parasite: item.parasite,
+            parasite_details: parasiteDetails,
+            parasite_unclassified: parasiteUnclassified,
             non_emergence: item.non_emergence,
             poor_emergence: item.poor_emergence,
           })
@@ -590,6 +621,8 @@ export async function updateShipment(
         damaged_in_transit: item.damaged_in_transit,
         diseased_in_transit: item.diseased_in_transit,
         parasite: item.parasite,
+        parasite_details: item.parasite_details ?? [],
+        parasite_unclassified: item.parasite - sumParasiteDetails(item.parasite_details ?? []),
         non_emergence: item.non_emergence,
         poor_emergence: item.poor_emergence,
       }));

@@ -316,6 +316,22 @@ describe("shipment queries", () => {
     ).rejects.toThrow(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);
   });
 
+  it("requires a complete classification before changing parasite counts when tracking is enabled", async () => {
+    const { tx } = buildItemUpdateTx(0, 0);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(
+        77,
+        55,
+        {
+          update_items: [updateItemPayload({ parasite: 1 })],
+        },
+        true,
+      ),
+    ).rejects.toThrow(SHIPMENT_ERRORS.PARASITE_DETAILS_REQUIRED);
+  });
+
   it("accepts a fully accounted item with known zero Good Emergence", async () => {
     const { tx } = buildItemUpdateTx(0, 0);
     mockTransaction.mockImplementationOnce(async (callback) => callback(tx));

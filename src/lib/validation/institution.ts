@@ -72,6 +72,7 @@ export const platformCreateInstitutionSchema = z
     // Platform flags
     iabes_member: z.boolean().optional(),
     stats_active: z.boolean().optional(),
+    track_parasite_details: z.boolean().optional(),
   })
   .strict();
 
@@ -95,6 +96,7 @@ export const tenantUpdateInstitutionSchema = z
 
     // Optional: decide if tenants can toggle their own visibility
     stats_active: z.boolean().optional(),
+    track_parasite_details: z.boolean().optional(),
 
     // Fields not in baseInstitutionFields but present in the schema
     theme_colors: z.array(z.string()).optional(),

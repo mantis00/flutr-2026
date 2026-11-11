@@ -64,6 +64,13 @@
       "when": 1792183878199,
       "tag": "0008_damp_hydra",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794367491709,
+      "tag": "0009_track_parasite_details",
+      "breakpoints": true
     }
   ]
 }
