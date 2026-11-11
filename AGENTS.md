@@ -122,7 +122,7 @@ pnpm db:studio      # Open Drizzle Studio GUI
 
 - Path alias: `@/` maps to `/src/`
 - Multi-tenant routing: `[institution]` dynamic segment isolates data per institution
-- Institution validation: `[institution]/layout.tsx` calls `getPublicInstitution(slug)` and triggers `notFound()` if the institution doesn't exist. The layout uses `getInstitutionBySlug` (ignores `stats_active`) so staff of a hidden institution keep admin access; `(public)/layout.tsx` and public pages use `getPublicInstitution` (filters `stats_active = true`) and call `notFound()` on null. The root `src/app/not-found.tsx` catches the 404.
+- Institution validation: `[institution]/layout.tsx` calls `getInstitutionBySlug(slug)` (ignores `stats_active`) and triggers `notFound()` if the institution doesn't exist, so staff of a hidden institution keep admin access. `(public)/layout.tsx` and the public pages use `getPublicInstitution` (filters `stats_active = true`) and call `notFound()` on null. `src/app/[institution]/not-found.tsx` catches 404s under `/[institution]`; the root `src/app/not-found.tsx` catches the rest.
 - Route groups: `(tenant)` for protected institution routes, `(public)` for public-facing institution routes, `(home)` for root public pages, `(platform)` for superuser platform pages
 - Client components marked with `"use client"`
 - API layer: Routes (validation + HTTP) → Services (auth, permissions, tenant logic) → Queries (DB only). Routes never call queries directly for authenticated resources.
