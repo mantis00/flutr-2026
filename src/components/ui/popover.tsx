@@ -5,14 +5,45 @@ import { Popover as PopoverPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
-function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot="popover" {...props} />;
+// Radix points aria-controls at content it unmounts while closed (see dialog.tsx), but the
+// trigger can carry role="combobox" — supplier-select does — where aria-controls is required
+// while expanded. So mirror the open state and strip only while closed, as select.tsx does;
+// undefined means "no mirror", leaving Radix's own behaviour for a trigger composed elsewhere.
+const PopoverOpenContext = React.createContext<boolean | undefined>(undefined);
+
+function Popover({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+
+  return (
+    <PopoverOpenContext.Provider value={open ?? uncontrolledOpen}>
+      <PopoverPrimitive.Root
+        data-slot="popover"
+        open={open}
+        defaultOpen={defaultOpen}
+        onOpenChange={(next) => {
+          setUncontrolledOpen(next);
+          onOpenChange?.(next);
+        }}
+        {...props}
+      />
+    </PopoverOpenContext.Provider>
+  );
 }
 
 function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  // Radix points aria-controls at content it unmounts while closed; see dialog.tsx.
+  const open = React.useContext(PopoverOpenContext);
+
   return (
-    <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} aria-controls={undefined} />
+    <PopoverPrimitive.Trigger
+      data-slot="popover-trigger"
+      {...props}
+      {...(open === false ? { "aria-controls": undefined } : {})}
+    />
   );
 }
 
