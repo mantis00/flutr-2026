@@ -45,8 +45,10 @@ export function FeaturedButterfly({
               unoptimized
               className="object-cover"
             />
-            <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/70 to-transparent p-4">
-              <p className="text-lg font-bold text-white">{common_name}</p>
+            {/* Scrim stays >=60% black behind the text: white on a pale photo is otherwise
+                unreadable, and the institution supplies the image. */}
+            <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/85 to-black/60 p-4">
+              <h3 className="text-lg font-bold text-white">{common_name}</h3>
               <p className="text-sm text-white/80 italic">{scientific_name}</p>
             </div>
           </div>

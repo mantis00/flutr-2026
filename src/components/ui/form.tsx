@@ -51,10 +51,14 @@ const useFormField = () => {
     throw new Error("useFormField should be used within <FormField>");
   }
 
-  const { id } = itemContext;
+  const { id, hasDescription, setHasDescription, hasMessage, setHasMessage } = itemContext;
 
   return {
     id,
+    hasDescription,
+    setHasDescription,
+    hasMessage,
+    setHasMessage,
     name: fieldContext.name,
     formItemId: `${id}-form-item`,
     formDescriptionId: `${id}-form-item-description`,
@@ -65,15 +69,29 @@ const useFormField = () => {
 
 type FormItemContextValue = {
   id: string;
+  hasDescription: boolean;
+  setHasDescription: (has: boolean) => void;
+  hasMessage: boolean;
+  setHasMessage: (has: boolean) => void;
 };
 
 const FormItemContext = React.createContext<FormItemContextValue>({} as FormItemContextValue);
 
 function FormItem({ className, ...props }: React.ComponentProps<"div">) {
   const id = React.useId();
+  // FormDescription and FormMessage are both optional (and FormMessage renders nothing without
+  // a body), so FormControl can only point aria-describedby at whichever has actually rendered —
+  // otherwise the reference dangles (WCAG 4.1.2). One of each per item: they share the item's id,
+  // so a second copy would both collide and flip the flag back on unmount.
+  const [hasDescription, setHasDescription] = React.useState(false);
+  const [hasMessage, setHasMessage] = React.useState(false);
+  const value = React.useMemo(
+    () => ({ id, hasDescription, setHasDescription, hasMessage, setHasMessage }),
+    [id, hasDescription, hasMessage],
+  );
 
   return (
-    <FormItemContext.Provider value={{ id }}>
+    <FormItemContext.Provider value={value}>
       <div data-slot="form-item" className={cn("grid gap-2", className)} {...props} />
     </FormItemContext.Provider>
   );
@@ -94,13 +112,17 @@ function FormLabel({ className, ...props }: React.ComponentProps<typeof LabelPri
 }
 
 function FormControl({ ...props }: React.ComponentProps<typeof Slot.Root>) {
-  const { error, formItemId, formDescriptionId, formMessageId } = useFormField();
+  const { error, formItemId, formDescriptionId, formMessageId, hasDescription, hasMessage } =
+    useFormField();
+  const describedBy =
+    [hasDescription && formDescriptionId, hasMessage && formMessageId].filter(Boolean).join(" ") ||
+    undefined;
 
   return (
     <Slot.Root
       data-slot="form-control"
       id={formItemId}
-      aria-describedby={!error ? `${formDescriptionId}` : `${formDescriptionId} ${formMessageId}`}
+      aria-describedby={describedBy}
       aria-invalid={!!error}
       {...props}
     />
@@ -108,7 +130,12 @@ function FormControl({ ...props }: React.ComponentProps<typeof Slot.Root>) {
 }
 
 function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
-  const { formDescriptionId } = useFormField();
+  const { formDescriptionId, setHasDescription } = useFormField();
+
+  React.useEffect(() => {
+    setHasDescription(true);
+    return () => setHasDescription(false);
+  }, [setHasDescription]);
 
   return (
     <p
@@ -121,8 +148,14 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 }
 
 function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
-  const { error, formMessageId } = useFormField();
+  const { error, formMessageId, setHasMessage } = useFormField();
   const body = error ? String(error?.message ?? "") : props.children;
+  const hasBody = !!body;
+
+  React.useEffect(() => {
+    setHasMessage(hasBody);
+    return () => setHasMessage(false);
+  }, [hasBody, setHasMessage]);
 
   if (!body) {
     return null;

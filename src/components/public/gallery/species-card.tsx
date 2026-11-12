@@ -87,7 +87,7 @@ export function SpeciesCard({
             {/* Info */}
             <CardContent className="py-3">
               <div className="flex items-center gap-1">
-                <h3 className="truncate text-sm font-semibold">{common_name}</h3>
+                <h2 className="truncate text-sm font-semibold">{common_name}</h2>
                 <ChevronRight
                   className="text-muted-foreground size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5"
                   aria-hidden="true"

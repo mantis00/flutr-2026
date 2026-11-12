@@ -10,7 +10,10 @@ function Popover({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Root
 }
 
 function PopoverTrigger({ ...props }: React.ComponentProps<typeof PopoverPrimitive.Trigger>) {
-  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />;
+  // Radix points aria-controls at content it unmounts while closed; see dialog.tsx.
+  return (
+    <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} aria-controls={undefined} />
+  );
 }
 
 function PopoverContent({

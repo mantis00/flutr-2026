@@ -12,7 +12,12 @@ function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>)
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
-  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
+  // Radix points aria-controls at content it unmounts while closed, leaving a dangling id
+  // reference (WCAG 4.1.2). aria-haspopup="dialog" + aria-expanded carry the relationship, and
+  // the APG dialog pattern doesn't use aria-controls, so drop it outright.
+  return (
+    <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} aria-controls={undefined} />
+  );
 }
 
 function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
