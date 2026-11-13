@@ -5,14 +5,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ROUTES } from "@/lib/routes";
 
-import { Institution } from "./institutions.utils";
+import { Institution, STATUS_LABEL } from "./institutions.utils";
 
 function getStatusVariant(status: string) {
   switch (status) {
-    case "ACTIVE":
+    case "LIVE":
       return "default";
-    case "SUSPENDED":
-      return "destructive";
+    case "HIDDEN":
+      return "secondary";
     default:
       return "outline";
   }
@@ -62,7 +62,9 @@ export default function InstitutionsCards({ institutions }: { institutions: Inst
                   </div>
                 </div>
 
-                <Badge variant={getStatusVariant(institution.status)}>{institution.status}</Badge>
+                <Badge variant={getStatusVariant(institution.status)}>
+                  {STATUS_LABEL[institution.status]}
+                </Badge>
               </div>
 
               <div className="space-y-1">
