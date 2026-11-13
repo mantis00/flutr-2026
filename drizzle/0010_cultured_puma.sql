@@ -1,0 +1,1 @@
+ALTER TABLE "shipment_items" ADD COLUMN "parasite_description" text;
