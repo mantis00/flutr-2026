@@ -108,6 +108,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return conflict("Cannot reduce shipment quantities below already released butterflies");
     }
 
+    if (
+      error instanceof Error &&
+      error.message === SHIPMENT_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL
+    ) {
+      return conflict("Wasp and fly counts cannot exceed the parasite total");
+    }
+
     if (error instanceof Error && error.message === SHIPMENT_ERRORS.SHIPMENT_ITEM_NOT_FOUND) {
       return notFound("Shipment item not found");
     }

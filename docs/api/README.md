@@ -308,6 +308,17 @@ per-item Released displays, Remaining/completion, and release capacity.
 inventory edit/delete guards. The values may legitimately differ; neither is
 recomputed from the other.
 
+Shipment item detail also includes nullable `parasiteWaspCount` and
+`parasiteFlyCount`. Both `null` means the optional parasitoid breakdown was not
+entered; otherwise the unclassified remainder is `parasite - parasiteWaspCount -
+parasiteFlyCount`, treating a null count as zero. `parasiteDescription` is
+nullable and stores optional species-specific detail. Shipment create and PATCH
+item payloads accept `parasite_wasp_count`, `parasite_fly_count`, and
+`parasite_description`; the description is limited to 1000 characters and the
+two counts cannot exceed the item's `parasite` total. These fields are
+maintained in the shipment detail workflow and are not part of the canonical
+13-column historical import/export contract.
+
 Shipment list and detail `remaining`/`isCompleted` are computed from
 `goodEmergence`, not `in_flight`: `remaining = number_received - losses -
 good_emergence`, clamped at 0. A `null` `goodEmergence` means Released is unknown,

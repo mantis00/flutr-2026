@@ -36,6 +36,9 @@ export type ShipmentItemRow = {
   damagedInTransit: number;
   diseasedInTransit: number;
   parasite: number;
+  parasiteWaspCount: number | null;
+  parasiteFlyCount: number | null;
+  parasiteDescription: string | null;
   nonEmergence: number;
   poorEmergence: number;
   /**
