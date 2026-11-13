@@ -239,7 +239,7 @@ export default function ShipmentsListPage() {
                         <TableCell className="font-medium">
                           <Link
                             href={href}
-                            aria-label={`Open shipment from ${shipment.supplierCode}`}
+                            aria-label={`${shipment.supplierCode} shipment details`}
                             className="focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                             onClick={(event) => event.stopPropagation()}
                           >

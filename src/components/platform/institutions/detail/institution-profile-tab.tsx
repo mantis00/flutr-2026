@@ -275,6 +275,7 @@ export default function InstitutionProfileTab({
           </SectionHeading>
 
           <fieldset disabled={readOnly} className="flex flex-col gap-4">
+            <legend className="sr-only">Identity</legend>
             <FormField
               control={form.control}
               name="name"
@@ -452,6 +453,7 @@ export default function InstitutionProfileTab({
           </SectionHeading>
 
           <fieldset disabled={readOnly} className="flex flex-col gap-6">
+            <legend className="sr-only">Media</legend>
             <div className="flex flex-col gap-3">
               <FormField
                 control={form.control}
@@ -557,6 +559,7 @@ export default function InstitutionProfileTab({
           </SectionHeading>
 
           <fieldset disabled={readOnly} className="flex flex-col gap-4">
+            <legend className="sr-only">Address</legend>
             <FormField
               control={form.control}
               name="street_address"
@@ -699,6 +702,7 @@ export default function InstitutionProfileTab({
           </SectionHeading>
 
           <fieldset disabled={readOnly} className="flex flex-col gap-4">
+            <legend className="sr-only">Contact</legend>
             <FormField
               control={form.control}
               name="email_address"
@@ -802,6 +806,7 @@ export default function InstitutionProfileTab({
           </SectionHeading>
 
           <fieldset disabled={readOnly} className="flex flex-col gap-4">
+            <legend className="sr-only">Social Links</legend>
             {(
               [
                 { name: "social_twitter", label: "Twitter / X" },
@@ -840,6 +845,7 @@ export default function InstitutionProfileTab({
               <h2 className="text-sm font-semibold">Platform Flags</h2>
 
               <fieldset disabled={readOnly} className="flex flex-col gap-4">
+                <legend className="sr-only">Platform Flags</legend>
                 <FormField
                   control={form.control}
                   name="stats_active"

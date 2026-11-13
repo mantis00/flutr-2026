@@ -152,25 +152,26 @@ export function SpeciesBreakdownChart({ data, slug }: SpeciesBreakdownChartProps
         <CardContent className="space-y-3 pt-4">
           <Link
             href={`/${slug}/stats/species`}
-            aria-label="View interactive species treemap"
-            className="group relative block h-[320px] w-full cursor-pointer overflow-hidden rounded-lg sm:h-[400px]"
+            aria-label="Species distribution by quantity in flight — open the interactive treemap"
+            className="group focus-visible:ring-ring relative block h-[320px] w-full cursor-pointer overflow-hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-offset-2 sm:h-[400px]"
           >
-            <span className="sr-only">
-              Treemap showing species distribution by quantity in flight
-            </span>
-            <ResponsiveContainer width="100%" height="100%">
-              <Treemap
-                data={data}
-                dataKey="quantity"
-                nameKey="name"
-                content={
-                  <TreemapCell x={0} y={0} width={0} height={0} index={0} name="" quantity={0} />
-                }
-                isAnimationActive={false}
-              >
-                <Tooltip content={<TreemapTooltip />} />
-              </Treemap>
-            </ResponsiveContainer>
+            {/* The cell labels are the link's visible text, so an aria-label could never
+                contain them (WCAG 2.5.3); the data itself lives on the linked page. */}
+            <div aria-hidden="true" className="size-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <Treemap
+                  data={data}
+                  dataKey="quantity"
+                  nameKey="name"
+                  content={
+                    <TreemapCell x={0} y={0} width={0} height={0} index={0} name="" quantity={0} />
+                  }
+                  isAnimationActive={false}
+                >
+                  <Tooltip content={<TreemapTooltip />} />
+                </Treemap>
+              </ResponsiveContainer>
+            </div>
           </Link>
           <Link
             href={`/${slug}/stats/species`}

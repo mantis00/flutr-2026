@@ -108,7 +108,7 @@ export function AuthNavPanel() {
     params?.institution ?? (isSuperuser ? null : session.user.institutionSlug) ?? null;
 
   return (
-    <div className="fixed top-16 right-4 z-50">
+    <nav aria-label="Admin quick navigation" className="fixed top-16 right-4 z-50">
       {!open ? (
         <Button
           variant="outline"
@@ -120,11 +120,7 @@ export function AuthNavPanel() {
           <Shield className="size-4" aria-hidden="true" />
         </Button>
       ) : (
-        <div
-          role="navigation"
-          aria-label="Admin quick navigation"
-          className="bg-background w-56 rounded-lg border shadow-lg"
-        >
+        <div className="bg-background w-56 rounded-lg border shadow-lg">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <p className="text-sm font-semibold">{isSuperuser ? "Admin Panel" : "Quick Nav"}</p>
             <Button
@@ -165,6 +161,6 @@ export function AuthNavPanel() {
           </div>
         </div>
       )}
-    </div>
+    </nav>
   );
 }

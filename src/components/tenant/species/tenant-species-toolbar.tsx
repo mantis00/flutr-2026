@@ -3,7 +3,6 @@
 import { Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 import type { SpeciesScope } from "./species.utils";
@@ -38,11 +37,8 @@ export default function TenantSpeciesToolbar({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="species-scope" className="sr-only">
-          Which species to show
-        </Label>
         <ToggleGroup
-          id="species-scope"
+          aria-label="Which species to show"
           type="single"
           variant="outline"
           value={scope}
@@ -53,12 +49,8 @@ export default function TenantSpeciesToolbar({
             }
           }}
         >
-          <ToggleGroupItem value="mine" aria-label="Show only species in your collection">
-            My species
-          </ToggleGroupItem>
-          <ToggleGroupItem value="all" aria-label="Show every species in the shared catalog">
-            All species
-          </ToggleGroupItem>
+          <ToggleGroupItem value="mine">My species</ToggleGroupItem>
+          <ToggleGroupItem value="all">All species</ToggleGroupItem>
         </ToggleGroup>
       </div>
     </div>
