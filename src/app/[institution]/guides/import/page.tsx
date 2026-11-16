@@ -205,16 +205,17 @@ export default async function ImportGuidePage({
             <h3 className="text-foreground text-sm font-semibold">Incorrect column header</h3>
             <SpreadsheetExample
               kind="excerpt"
-              label="Example header row with incorrect column names"
-              headers={["Species", "Common Name", "Qty Received", "Supplier", "..."]}
+              label="Example header row mixing an accepted rename with a rejected one"
+              headers={["Species", "COMMON NAME", "Qty Received", "Supplier", "..."]}
               rows={[]}
               caption={
                 <>
-                  &ldquo;Common Name&rdquo; and &ldquo;Qty Received&rdquo; don&apos;t match the
-                  required &ldquo;Common name&rdquo; / &ldquo;No. rec&rdquo; exactly. Capitalization
-                  and spacing are forgiving, and column order doesn&apos;t matter, but every column
-                  must exist with the right name — this file is rejected before any row is even
-                  checked, so fixing the header is always the first step.
+                  &ldquo;COMMON NAME&rdquo; is accepted — capitalization doesn&apos;t matter.
+                  &ldquo;Qty Received&rdquo; is rejected — it doesn&apos;t match the required
+                  &ldquo;No. rec&rdquo; at all. Surrounding whitespace and column order don&apos;t
+                  affect matching either, but every column must exist with a recognized name, so
+                  this file is rejected before any row is even checked. Fixing the header is always
+                  the first step.
                 </>
               }
             />
