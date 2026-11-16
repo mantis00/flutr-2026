@@ -5,14 +5,14 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ROUTES } from "@/lib/routes";
 
-import { Institution } from "./institutions.utils";
+import { Institution, STATUS_LABEL } from "./institutions.utils";
 
 function getStatusVariant(status: string) {
   switch (status) {
-    case "ACTIVE":
+    case "LIVE":
       return "default";
-    case "SUSPENDED":
-      return "destructive";
+    case "HIDDEN":
+      return "secondary";
     default:
       return "outline";
   }
@@ -68,7 +68,9 @@ export default function InstitutionsTableRow({ institution }: { institution: Ins
 
       {/* Status */}
       <TableCell>
-        <Badge variant={getStatusVariant(institution.status)}>{institution.status}</Badge>
+        <Badge variant={getStatusVariant(institution.status)}>
+          {STATUS_LABEL[institution.status]}
+        </Badge>
       </TableCell>
 
       {/* Actions */}

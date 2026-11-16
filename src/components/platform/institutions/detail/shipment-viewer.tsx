@@ -139,7 +139,8 @@ export default function ShipmentViewer({
                   type="button"
                   onClick={() => toggleYear(year)}
                   aria-expanded={isOpen}
-                  aria-controls={panelId}
+                  // The panel only renders while open, so the reference would otherwise dangle.
+                  aria-controls={isOpen ? panelId : undefined}
                   className="hover:bg-accent flex w-full items-center justify-between px-4 py-3 text-left text-xs font-medium"
                 >
                   <span>

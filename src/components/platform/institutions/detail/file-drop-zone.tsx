@@ -73,6 +73,7 @@ export default function FileDropZone({
           const file = e.dataTransfer.files[0];
           if (file) await handleFileSelection(file);
         }}
+        role="group"
         aria-label={
           isReadingFile ? "Reading file…" : "Drop zone — drag and drop an Excel or CSV file here"
         }
@@ -106,6 +107,7 @@ export default function FileDropZone({
           type="file"
           accept=".xlsx,.xls,.csv,.tsv,.txt"
           className="sr-only"
+          tabIndex={-1}
           aria-label="Upload file"
           disabled={disabled}
           onChange={(e) => {

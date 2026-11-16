@@ -13,7 +13,14 @@ function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimit
 function AlertDialogTrigger({
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Trigger>) {
-  return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />;
+  // Radix points aria-controls at content it unmounts while closed; see dialog.tsx.
+  return (
+    <AlertDialogPrimitive.Trigger
+      data-slot="alert-dialog-trigger"
+      {...props}
+      aria-controls={undefined}
+    />
+  );
 }
 
 function AlertDialogPortal({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Portal>) {

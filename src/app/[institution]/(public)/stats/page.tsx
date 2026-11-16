@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { getPublicInstitution } from "@/lib/queries/institution";
@@ -29,7 +30,8 @@ export async function generateMetadata({ params }: StatsPageProps): Promise<Meta
 export default async function StatsPage({ params }: StatsPageProps) {
   const { institution: slug } = await params;
 
-  const inst = (await getPublicInstitution(slug))!;
+  const inst = await getPublicInstitution(slug);
+  if (!inst) notFound();
 
   const [rows, featured] = await Promise.all([
     getStatsData(inst.id).then(attachImages),

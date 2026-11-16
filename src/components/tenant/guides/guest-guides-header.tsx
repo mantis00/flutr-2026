@@ -29,10 +29,7 @@ export function GuestGuidesHeader() {
   );
 
   return (
-    <header
-      role="banner"
-      className="bg-background flex h-14 shrink-0 items-center border-b px-4 sm:px-6"
-    >
+    <header className="bg-background flex h-14 shrink-0 items-center border-b px-4 sm:px-6">
       <div className="flex min-w-0 flex-1 items-center justify-between gap-3 sm:gap-6">
         {/* min-w-0 so the institution name can actually shrink: a flex item
             defaults to min-width:auto, which `truncate` alone won't override. */}

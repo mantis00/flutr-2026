@@ -54,3 +54,4 @@ package-lock.json
 
 # Playwright MCP scratch output
 .playwright-mcp/
+/accessibility/

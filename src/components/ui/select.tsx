@@ -6,8 +6,35 @@ import { Select as SelectPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 
-function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+// Radix sets aria-controls on the trigger unconditionally, but unmounts the content when
+// closed, leaving a dangling id reference (WCAG 4.1.2). The trigger strips it while closed and
+// keeps Radix's value while open, where role="combobox" requires it. Mirrors open state because
+// Radix doesn't expose its select context; undefined means "no mirror", so a trigger composed
+// outside this wrapper keeps Radix's own behaviour rather than stripping while open.
+const SelectOpenContext = React.createContext<boolean | undefined>(undefined);
+
+function Select({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen ?? false);
+
+  return (
+    <SelectOpenContext.Provider value={open ?? uncontrolledOpen}>
+      <SelectPrimitive.Root
+        data-slot="select"
+        open={open}
+        defaultOpen={defaultOpen}
+        onOpenChange={(next) => {
+          setUncontrolledOpen(next);
+          onOpenChange?.(next);
+        }}
+        {...props}
+      />
+    </SelectOpenContext.Provider>
+  );
 }
 
 function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {
@@ -26,6 +53,8 @@ function SelectTrigger({
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default";
 }) {
+  const open = React.useContext(SelectOpenContext);
+
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
@@ -35,6 +64,7 @@ function SelectTrigger({
         className,
       )}
       {...props}
+      {...(open === false ? { "aria-controls": undefined } : {})}
     >
       {children}
       <SelectPrimitive.Icon asChild>

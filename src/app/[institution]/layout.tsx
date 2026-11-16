@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
-import { getPublicInstitution } from "@/lib/queries/institution";
+import { auth } from "@/auth";
+import { canCrossTenant, requireUser } from "@/lib/authz";
+import { getInstitutionBySlug } from "@/lib/queries/institution";
 import { InstitutionDataProvider } from "@/components/providers/institution-provider";
 import { readableForeground } from "@/lib/theme-color";
 import type { PublicInstitution } from "@/types/institution";
@@ -9,19 +11,36 @@ interface InstitutionLayoutProps {
   params: Promise<{ institution: string }>;
 }
 
+async function viewerIsStaff(slug: string): Promise<boolean> {
+  const session = await auth();
+  try {
+    const user = requireUser(session);
+    return canCrossTenant(user) || session?.user?.institutionSlug === slug;
+  } catch {
+    return false;
+  }
+}
+
 export default async function InstitutionLayout({ children, params }: InstitutionLayoutProps) {
   const { institution: slug } = await params;
 
-  const row = await getPublicInstitution(slug);
+  // Not filtered by public-site visibility: staff of a hidden institution still need
+  // the admin area. Public routes are gated in `(public)/layout.tsx`.
+  const found = await getInstitutionBySlug(slug);
 
-  if (!row) notFound();
+  if (!found) notFound();
 
-  const institution: PublicInstitution = {
-    ...row,
-    social_links: row.social_links as PublicInstitution["social_links"],
-  };
+  const { public_site_live: publicSiteLive, ...row } = found;
 
-  const primaryColor = institution.theme_colors?.[0];
+  // Provider props are serialized into the HTML and RSC payload, so a hidden
+  // institution's profile would be readable even on routes that 404. The short-circuit
+  // keeps a live site from touching cookies, which would make public pages dynamic.
+  const institution: PublicInstitution | null =
+    publicSiteLive || (await viewerIsStaff(slug))
+      ? { ...row, social_links: row.social_links as PublicInstitution["social_links"] }
+      : null;
+
+  const primaryColor = institution?.theme_colors?.[0];
   const primaryForeground = primaryColor ? readableForeground(primaryColor) : null;
 
   return (
