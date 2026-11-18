@@ -103,7 +103,14 @@ function updateItemPayload(
   };
 }
 
-function buildItemUpdateTx(goodEmergence: number | null, inFlightTotal: number) {
+function buildItemUpdateTx(
+  goodEmergence: number | null,
+  inFlightTotal: number,
+  parasiteCounts: { waspCount: number | null; flyCount: number | null } = {
+    waspCount: null,
+    flyCount: null,
+  },
+) {
   const itemUpdateWhere = jest.fn().mockResolvedValue(undefined);
   const itemUpdateSet = jest.fn(() => ({ where: itemUpdateWhere }));
   const tx = {
@@ -115,7 +122,16 @@ function buildItemUpdateTx(goodEmergence: number | null, inFlightTotal: number) 
 
   tx.select
     .mockImplementationOnce(() => createThenableQuery([{ id: 55 }]))
-    .mockImplementationOnce(() => createLockableQuery([{ id: 7, goodEmergence }]))
+    .mockImplementationOnce(() =>
+      createLockableQuery([
+        {
+          id: 7,
+          goodEmergence,
+          parasiteWaspCount: parasiteCounts.waspCount,
+          parasiteFlyCount: parasiteCounts.flyCount,
+        },
+      ]),
+    )
     .mockImplementationOnce(() => createThenableQuery([{ total: inFlightTotal }]));
 
   return { tx, itemUpdateSet };
@@ -305,6 +321,62 @@ describe("shipment queries", () => {
     );
   });
 
+  it("persists an explicit wasp/fly breakdown on item edits", async () => {
+    const { tx, itemUpdateSet } = buildItemUpdateTx(0, 0);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [
+          updateItemPayload({
+            parasite: 4,
+            parasite_wasp_count: 1,
+            parasite_fly_count: 1,
+          }),
+        ],
+      }),
+    ).resolves.toBe(true);
+
+    expect(itemUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parasite: 4,
+        parasite_wasp_count: 1,
+        parasite_fly_count: 1,
+      }),
+    );
+  });
+
+  it("persists a per-species description on item edits", async () => {
+    const { tx, itemUpdateSet } = buildItemUpdateTx(0, 0);
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [
+          updateItemPayload({
+            parasite: 2,
+            parasite_description: "Possible tachinid fly",
+          }),
+        ],
+      }),
+    ).resolves.toBe(true);
+
+    expect(itemUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ parasite_description: "Possible tachinid fly" }),
+    );
+  });
+
+  it("prevents reducing the parasite total below an existing breakdown", async () => {
+    const { tx } = buildItemUpdateTx(0, 0, { waspCount: 2, flyCount: 1 });
+    mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
+
+    await expect(
+      updateShipment(77, 55, {
+        update_items: [updateItemPayload({ parasite: 2 })],
+      }),
+    ).rejects.toThrow(SHIPMENT_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL);
+  });
+
   it("retains the event-backed guard when Good Emergence is NULL", async () => {
     const { tx } = buildItemUpdateTx(null, 6);
     mockTransaction.mockImplementationOnce(async (callback) => callback(tx));
@@ -393,6 +465,45 @@ describe("shipment queries", () => {
 
       expect(insertStub.itemValues).toHaveBeenCalledWith([
         expect.objectContaining({ good_emergence: 0 }),
+      ]);
+    });
+
+    it("stores an entered parasitoid count and derives omitted types as zero", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem({ parasite: 4, parasite_wasp_count: 1 })],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({
+          parasite_wasp_count: 1,
+          parasite_fly_count: 0,
+        }),
+      ]);
+    });
+
+    it("stores an optional per-species parasite description", async () => {
+      const insertStub = buildInsertStub();
+      mockTransaction.mockImplementationOnce(async (callback) =>
+        callback({ insert: insertStub.insert }),
+      );
+
+      await createShipment(77, {
+        supplier_code: "SUP-1",
+        shipment_date: new Date("2026-06-10T00:00:00.000Z"),
+        arrival_date: new Date("2026-06-11T00:00:00.000Z"),
+        items: [buildItem({ parasite: 1, parasite_description: "Tiny wasp larvae" })],
+      });
+
+      expect(insertStub.itemValues).toHaveBeenCalledWith([
+        expect.objectContaining({ parasite_description: "Tiny wasp larvae" }),
       ]);
     });
 

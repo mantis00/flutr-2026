@@ -10,6 +10,7 @@ import { formatDateOnlyForDisplay } from "@/lib/date-only";
 import { logger } from "@/lib/logger";
 import { ROUTES } from "@/lib/routes";
 import { hasPermission } from "@/lib/permissions";
+import { normalizeParasiteBreakdown } from "@/lib/parasite-breakdown";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -284,6 +285,9 @@ export default function ShipmentDetailPage() {
             damagedInTransit: 0,
             diseasedInTransit: 0,
             parasite: 0,
+            parasiteWaspCount: null,
+            parasiteFlyCount: null,
+            parasiteDescription: null,
             nonEmergence: 0,
             poorEmergence: 0,
             inFlightQuantity: 0,
@@ -299,6 +303,24 @@ export default function ShipmentDetailPage() {
       current.map((item) => (item.id === itemId ? { ...item, [field]: value } : item)),
     );
   }, []);
+
+  const handleParasiteBreakdownChange = useCallback(
+    (itemId: number, waspCount: number | null, flyCount: number | null, description: string) => {
+      setDraftItems((current) =>
+        current.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                parasiteWaspCount: waspCount,
+                parasiteFlyCount: flyCount,
+                parasiteDescription: description,
+              }
+            : item,
+        ),
+      );
+    },
+    [],
+  );
 
   const handleRemoveDraftItem = useCallback((itemId: number) => {
     setDraftItems((current) => current.filter((item) => item.id !== itemId));
@@ -319,31 +341,54 @@ export default function ShipmentDetailPage() {
         if (draft.id <= 0) return false;
         const orig = original.get(draft.id);
         if (!orig) return false;
-        return (Object.keys(METRIC_TO_API) as MetricKey[]).some((k) => orig[k] !== draft[k]);
+        return (
+          (Object.keys(METRIC_TO_API) as MetricKey[]).some((k) => orig[k] !== draft[k]) ||
+          orig.parasiteWaspCount !== draft.parasiteWaspCount ||
+          orig.parasiteFlyCount !== draft.parasiteFlyCount ||
+          orig.parasiteDescription !== draft.parasiteDescription
+        );
       })
-      .map((draft) => ({
-        id: draft.id,
-        number_received: draft.numberReceived,
-        emerged_in_transit: draft.emergedInTransit,
-        damaged_in_transit: draft.damagedInTransit,
-        diseased_in_transit: draft.diseasedInTransit,
-        parasite: draft.parasite,
-        non_emergence: draft.nonEmergence,
-        poor_emergence: draft.poorEmergence,
-      }));
+      .map((draft) => {
+        const parasiteBreakdown = normalizeParasiteBreakdown(
+          draft.parasiteWaspCount,
+          draft.parasiteFlyCount,
+        );
+        return {
+          id: draft.id,
+          number_received: draft.numberReceived,
+          emerged_in_transit: draft.emergedInTransit,
+          damaged_in_transit: draft.damagedInTransit,
+          diseased_in_transit: draft.diseasedInTransit,
+          parasite: draft.parasite,
+          parasite_wasp_count: parasiteBreakdown.waspCount,
+          parasite_fly_count: parasiteBreakdown.flyCount,
+          parasite_description: draft.parasiteDescription?.trim() || null,
+          non_emergence: draft.nonEmergence,
+          poor_emergence: draft.poorEmergence,
+        };
+      });
 
     const addItems = draftItems
       .filter((draft) => draft.id <= 0)
-      .map((draft) => ({
-        butterfly_species_id: draft.butterflySpeciesId,
-        number_received: draft.numberReceived,
-        emerged_in_transit: draft.emergedInTransit,
-        damaged_in_transit: draft.damagedInTransit,
-        diseased_in_transit: draft.diseasedInTransit,
-        parasite: draft.parasite,
-        non_emergence: draft.nonEmergence,
-        poor_emergence: draft.poorEmergence,
-      }));
+      .map((draft) => {
+        const parasiteBreakdown = normalizeParasiteBreakdown(
+          draft.parasiteWaspCount,
+          draft.parasiteFlyCount,
+        );
+        return {
+          butterfly_species_id: draft.butterflySpeciesId,
+          number_received: draft.numberReceived,
+          emerged_in_transit: draft.emergedInTransit,
+          damaged_in_transit: draft.damagedInTransit,
+          diseased_in_transit: draft.diseasedInTransit,
+          parasite: draft.parasite,
+          parasite_wasp_count: parasiteBreakdown.waspCount,
+          parasite_fly_count: parasiteBreakdown.flyCount,
+          parasite_description: draft.parasiteDescription?.trim() || null,
+          non_emergence: draft.nonEmergence,
+          poor_emergence: draft.poorEmergence,
+        };
+      });
 
     const deleteItems = data.items
       .filter((item) => !existingDraftIds.has(item.id))
@@ -534,6 +579,7 @@ export default function ShipmentDetailPage() {
             items={editing ? draftItems : data.items}
             editing={editing}
             onMetricChange={handleMetricChange}
+            onParasiteBreakdownChange={handleParasiteBreakdownChange}
             onRemoveItem={handleRemoveDraftItem}
           />
         </CardContent>

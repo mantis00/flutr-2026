@@ -30,6 +30,8 @@ export const RELEASE_ERRORS = {
     "Create release loss_updates cannot decrease shipment loss totals; use shipment edit for corrections",
   LOSS_TOTAL_UNDERFLOW:
     "Release edit would reduce shipment loss totals below zero; adjust shipment totals first",
+  PARASITE_BREAKDOWN_EXCEEDS_TOTAL:
+    "Release changes would reduce the parasite total below its wasp/fly breakdown",
   EMPTY_RELEASE_EVENT:
     "Release must include at least one in-flight or loss quantity; delete release instead",
   GOOD_EMERGENCE_UNTRACKED:
@@ -579,6 +581,8 @@ export async function updateReleaseEventItems(
         damaged_in_transit: shipment_items.damaged_in_transit,
         diseased_in_transit: shipment_items.diseased_in_transit,
         parasite: shipment_items.parasite,
+        parasite_wasp_count: shipment_items.parasite_wasp_count,
+        parasite_fly_count: shipment_items.parasite_fly_count,
         non_emergence: shipment_items.non_emergence,
         poor_emergence: shipment_items.poor_emergence,
         good_emergence: shipment_items.good_emergence,
@@ -640,6 +644,10 @@ export async function updateReleaseEventItems(
           throw new Error(RELEASE_ERRORS.LOSS_TOTAL_UNDERFLOW);
         }
         row[column] = next;
+      }
+
+      if ((row.parasite_wasp_count ?? 0) + (row.parasite_fly_count ?? 0) > row.parasite) {
+        throw new Error(RELEASE_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL);
       }
 
       const nextLosses = toLossValues({
@@ -1513,6 +1521,8 @@ export async function deleteReleaseEvent(institutionId: number, releaseEventId: 
       damaged_in_transit: number;
       diseased_in_transit: number;
       parasite: number;
+      parasite_wasp_count: number | null;
+      parasite_fly_count: number | null;
       non_emergence: number;
       poor_emergence: number;
       good_emergence: number | null;
@@ -1524,6 +1534,8 @@ export async function deleteReleaseEvent(institutionId: number, releaseEventId: 
           damaged_in_transit: shipment_items.damaged_in_transit,
           diseased_in_transit: shipment_items.diseased_in_transit,
           parasite: shipment_items.parasite,
+          parasite_wasp_count: shipment_items.parasite_wasp_count,
+          parasite_fly_count: shipment_items.parasite_fly_count,
           non_emergence: shipment_items.non_emergence,
           poor_emergence: shipment_items.poor_emergence,
           good_emergence: shipment_items.good_emergence,
@@ -1596,6 +1608,19 @@ export async function deleteReleaseEvent(institutionId: number, releaseEventId: 
         ...shipmentPatchByItemId.get(inFlightRow.shipmentItemId),
         good_emergence: nextGoodEmergence,
       });
+    }
+
+    for (const [shipmentItemId, patch] of shipmentPatchByItemId) {
+      const locked = lockedById.get(shipmentItemId);
+      if (!locked) {
+        throw new Error(RELEASE_ERRORS.SHIPMENT_ITEM_NOT_FOUND);
+      }
+      if (
+        (locked.parasite_wasp_count ?? 0) + (locked.parasite_fly_count ?? 0) >
+        (patch.parasite ?? locked.parasite)
+      ) {
+        throw new Error(RELEASE_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL);
+      }
     }
 
     for (const [shipmentItemId, patch] of shipmentPatchByItemId) {

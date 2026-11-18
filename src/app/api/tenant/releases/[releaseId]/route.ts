@@ -120,6 +120,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         return conflict(error.message);
       }
 
+      if (error.message === RELEASE_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL) {
+        return conflict(error.message);
+      }
+
       if (error.message === RELEASE_ERRORS.GOOD_EMERGENCE_UNTRACKED) {
         return conflict(error.message);
       }
@@ -167,6 +171,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       }
 
       if (error.message === RELEASE_ERRORS.LOSS_TOTAL_UNDERFLOW) {
+        return conflict(error.message);
+      }
+
+      if (error.message === RELEASE_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL) {
         return conflict(error.message);
       }
 

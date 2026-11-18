@@ -11,6 +11,7 @@ import {
   release_event_losses,
 } from "@/lib/schema";
 import { ensureSpeciesLinksForInstitution } from "@/lib/queries/species";
+import { normalizeParasiteBreakdown } from "@/lib/parasite-breakdown";
 
 import type { CreateShipmentBody, UpdateShipmentBody } from "@/lib/validation/shipments";
 
@@ -33,6 +34,7 @@ export const SHIPMENT_ERRORS = {
   CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
   GOOD_EMERGENCE_EXCEEDS_AVAILABLE: "GOOD_EMERGENCE_EXCEEDS_AVAILABLE",
   INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
+  PARASITE_BREAKDOWN_EXCEEDS_TOTAL: "PARASITE_BREAKDOWN_EXCEEDS_TOTAL",
   SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
 } as const;
 
@@ -240,6 +242,9 @@ export async function getShipmentWithItems(institutionId: number, shipmentId: nu
       damagedInTransit: shipment_items.damaged_in_transit,
       diseasedInTransit: shipment_items.diseased_in_transit,
       parasite: shipment_items.parasite,
+      parasiteWaspCount: shipment_items.parasite_wasp_count,
+      parasiteFlyCount: shipment_items.parasite_fly_count,
+      parasiteDescription: shipment_items.parasite_description,
       nonEmergence: shipment_items.non_emergence,
       poorEmergence: shipment_items.poor_emergence,
       goodEmergence: shipment_items.good_emergence,
@@ -301,22 +306,31 @@ export async function createShipment(
       })
       .returning({ id: shipments.id });
 
-    const items = payload.items.map((item) => ({
-      institution_id: institutionId,
-      shipment_id: inserted.id,
-      butterfly_species_id: item.butterfly_species_id,
-      number_received: item.number_received,
-      emerged_in_transit: item.emerged_in_transit,
-      damaged_in_transit: item.damaged_in_transit,
-      diseased_in_transit: item.diseased_in_transit,
-      parasite: item.parasite,
-      non_emergence: item.non_emergence,
-      poor_emergence: item.poor_emergence,
-      // Never `item.good_emergence ?? 0` — `??` treats an explicit `null` (historically
-      // unknown) the same as `undefined` (field omitted by a manual-create caller), which
-      // would silently turn "unknown" into "known zero." Only an omitted field defaults to 0.
-      good_emergence: item.good_emergence === undefined ? 0 : item.good_emergence,
-    }));
+    const items = payload.items.map((item) => {
+      const parasiteBreakdown = normalizeParasiteBreakdown(
+        item.parasite_wasp_count ?? null,
+        item.parasite_fly_count ?? null,
+      );
+      return {
+        institution_id: institutionId,
+        shipment_id: inserted.id,
+        butterfly_species_id: item.butterfly_species_id,
+        number_received: item.number_received,
+        emerged_in_transit: item.emerged_in_transit,
+        damaged_in_transit: item.damaged_in_transit,
+        diseased_in_transit: item.diseased_in_transit,
+        parasite: item.parasite,
+        parasite_wasp_count: parasiteBreakdown.waspCount,
+        parasite_fly_count: parasiteBreakdown.flyCount,
+        parasite_description: item.parasite_description?.trim() || null,
+        non_emergence: item.non_emergence,
+        poor_emergence: item.poor_emergence,
+        // Never `item.good_emergence ?? 0` — `??` treats an explicit `null` (historically
+        // unknown) the same as `undefined` (field omitted by a manual-create caller), which
+        // would silently turn "unknown" into "known zero." Only an omitted field defaults to 0.
+        good_emergence: item.good_emergence === undefined ? 0 : item.good_emergence,
+      };
+    });
 
     await ensureSpeciesLinksForInstitution(
       institutionId,
@@ -508,6 +522,9 @@ export async function updateShipment(
           .select({
             id: shipment_items.id,
             goodEmergence: shipment_items.good_emergence,
+            parasiteWaspCount: shipment_items.parasite_wasp_count,
+            parasiteFlyCount: shipment_items.parasite_fly_count,
+            parasiteDescription: shipment_items.parasite_description,
           })
           .from(shipment_items)
           .where(
@@ -535,6 +552,24 @@ export async function updateShipment(
 
         const inFlightTotal = inFlightRow?.total ?? 0;
         const goodEmergence = lockedRows[0].goodEmergence;
+        const hasBreakdownUpdate =
+          item.parasite_wasp_count !== undefined || item.parasite_fly_count !== undefined;
+        const parasiteBreakdown = hasBreakdownUpdate
+          ? normalizeParasiteBreakdown(
+              item.parasite_wasp_count ?? null,
+              item.parasite_fly_count ?? null,
+            )
+          : {
+              waspCount: lockedRows[0].parasiteWaspCount,
+              flyCount: lockedRows[0].parasiteFlyCount,
+            };
+
+        if (
+          (parasiteBreakdown.waspCount ?? 0) + (parasiteBreakdown.flyCount ?? 0) >
+          item.parasite
+        ) {
+          throw new Error(SHIPMENT_ERRORS.PARASITE_BREAKDOWN_EXCEEDS_TOTAL);
+        }
 
         const availableAfterUpdate =
           item.number_received -
@@ -553,17 +588,28 @@ export async function updateShipment(
           throw new Error(SHIPMENT_ERRORS.INVALID_INVENTORY_REDUCTION);
         }
 
+        const updateData = {
+          number_received: item.number_received,
+          emerged_in_transit: item.emerged_in_transit,
+          damaged_in_transit: item.damaged_in_transit,
+          diseased_in_transit: item.diseased_in_transit,
+          parasite: item.parasite,
+          non_emergence: item.non_emergence,
+          poor_emergence: item.poor_emergence,
+          ...(hasBreakdownUpdate
+            ? {
+                parasite_wasp_count: parasiteBreakdown.waspCount,
+                parasite_fly_count: parasiteBreakdown.flyCount,
+              }
+            : {}),
+          ...(item.parasite_description !== undefined
+            ? { parasite_description: item.parasite_description?.trim() || null }
+            : {}),
+        };
+
         await tx
           .update(shipment_items)
-          .set({
-            number_received: item.number_received,
-            emerged_in_transit: item.emerged_in_transit,
-            damaged_in_transit: item.damaged_in_transit,
-            diseased_in_transit: item.diseased_in_transit,
-            parasite: item.parasite,
-            non_emergence: item.non_emergence,
-            poor_emergence: item.poor_emergence,
-          })
+          .set(updateData)
           .where(
             and(
               eq(shipment_items.id, item.id),
@@ -581,18 +627,27 @@ export async function updateShipment(
         tx,
       );
 
-      const rows = payload.add_items.map((item) => ({
-        institution_id: institutionId,
-        shipment_id: shipmentId,
-        butterfly_species_id: item.butterfly_species_id,
-        number_received: item.number_received,
-        emerged_in_transit: item.emerged_in_transit,
-        damaged_in_transit: item.damaged_in_transit,
-        diseased_in_transit: item.diseased_in_transit,
-        parasite: item.parasite,
-        non_emergence: item.non_emergence,
-        poor_emergence: item.poor_emergence,
-      }));
+      const rows = payload.add_items.map((item) => {
+        const parasiteBreakdown = normalizeParasiteBreakdown(
+          item.parasite_wasp_count ?? null,
+          item.parasite_fly_count ?? null,
+        );
+        return {
+          institution_id: institutionId,
+          shipment_id: shipmentId,
+          butterfly_species_id: item.butterfly_species_id,
+          number_received: item.number_received,
+          emerged_in_transit: item.emerged_in_transit,
+          damaged_in_transit: item.damaged_in_transit,
+          diseased_in_transit: item.diseased_in_transit,
+          parasite: item.parasite,
+          parasite_wasp_count: parasiteBreakdown.waspCount,
+          parasite_fly_count: parasiteBreakdown.flyCount,
+          parasite_description: item.parasite_description?.trim() || null,
+          non_emergence: item.non_emergence,
+          poor_emergence: item.poor_emergence,
+        };
+      });
 
       await tx.insert(shipment_items).values(rows);
     }

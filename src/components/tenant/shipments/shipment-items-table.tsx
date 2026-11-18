@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState } from "react";
 import Image from "next/image";
-import { Bug, CheckCircle2, Minus, Plus, Trash2 } from "lucide-react";
+import { Bug, CheckCircle2, ChevronDown, Minus, Plus, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -30,6 +32,7 @@ import {
 } from "@/components/shared/species-search-toolbar";
 import { useSpeciesSearch, type SpeciesItem } from "@/hooks/use-species-search";
 import { cn } from "@/lib/utils";
+import { computeOtherParasiteCount } from "@/lib/parasite-breakdown";
 
 import {
   computeItemEditReserve,
@@ -86,6 +89,13 @@ interface ShipmentItemsTableProps {
   editing: boolean;
   /** Called when editing mode is on and the user changes a metric. */
   onMetricChange?: (itemId: number, field: MetricKey, value: number) => void;
+  /** Called when editing mode is on and the user changes parasitoid counts. */
+  onParasiteBreakdownChange?: (
+    itemId: number,
+    waspCount: number | null,
+    flyCount: number | null,
+    description: string,
+  ) => void;
   /** Called when editing mode is on and the user wants to remove an item. */
   onRemoveItem?: (itemId: number) => void;
 }
@@ -107,6 +117,15 @@ function metricMaxFor(item: ShipmentItemRow, field: MetricKey): number | undefin
 }
 
 function metricMinFor(item: ShipmentItemRow, field: MetricKey): number {
+  if (field === "parasite") {
+    const otherLosses = LOSS_FIELDS.filter((key) => key !== "parasite").reduce(
+      (acc, key) => acc + item[key],
+      0,
+    );
+    const inventoryMinimum = computeItemEditReserve(item) + otherLosses;
+    const categorizedMinimum = (item.parasiteWaspCount ?? 0) + (item.parasiteFlyCount ?? 0);
+    return Math.max(inventoryMinimum, categorizedMinimum);
+  }
   if (field !== "numberReceived") return 0;
   const totalLosses = LOSS_FIELDS.reduce((acc, k) => acc + item[k], 0);
   return computeItemEditReserve(item) + totalLosses;
@@ -124,6 +143,7 @@ export function ShipmentItemsTable({
   items,
   editing,
   onMetricChange,
+  onParasiteBreakdownChange,
   onRemoveItem,
 }: ShipmentItemsTableProps) {
   const adapted = useMemo<ItemSpeciesItem[]>(
@@ -142,6 +162,19 @@ export function ShipmentItemsTable({
   const search = useSpeciesSearch<ItemSpeciesItem>({ items: adapted, pageSize: items.length || 1 });
 
   const [pendingDelete, setPendingDelete] = useState<ShipmentItemRow | null>(null);
+  const showParasiteBreakdown =
+    editing ||
+    items.some(
+      (item) =>
+        item.parasite > 0 &&
+        (item.parasiteWaspCount !== null ||
+          item.parasiteFlyCount !== null ||
+          Boolean(item.parasiteDescription?.trim())),
+    );
+  const hasShipmentBreakdownCounts = items.some(
+    (item) =>
+      item.parasite > 0 && (item.parasiteWaspCount !== null || item.parasiteFlyCount !== null),
+  );
 
   return (
     <div className="space-y-4">
@@ -167,6 +200,9 @@ export function ShipmentItemsTable({
                   {col.short}
                 </TableHead>
               ))}
+              {showParasiteBreakdown && (
+                <TableHead className="text-center">Parasite breakdown</TableHead>
+              )}
               <TableHead className="text-center">Released</TableHead>
               <TableHead className="text-center">Remaining</TableHead>
               {editing && <TableHead className="w-[60px]" />}
@@ -176,7 +212,9 @@ export function ShipmentItemsTable({
             {search.results.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={METRIC_COLUMNS.length + (editing ? 4 : 3)}
+                  colSpan={
+                    METRIC_COLUMNS.length + (showParasiteBreakdown ? 4 : 3) + (editing ? 1 : 0)
+                  }
                   className="text-muted-foreground py-6 text-center text-sm"
                 >
                   No species in this shipment.
@@ -224,6 +262,18 @@ export function ShipmentItemsTable({
                       )}
                     </TableCell>
                   ))}
+                  {showParasiteBreakdown && (
+                    <TableCell className="text-sm">
+                      <ParasiteBreakdownCell
+                        item={item}
+                        editing={editing}
+                        showUnenteredAsOther={hasShipmentBreakdownCounts}
+                        onChange={(waspCount, flyCount, description) =>
+                          onParasiteBreakdownChange?.(item.id, waspCount, flyCount, description)
+                        }
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="text-center text-sm">
                     {formatReleasedQuantity(item.goodEmergence)}
                   </TableCell>
@@ -306,6 +356,150 @@ export function ShipmentItemsTable({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+interface ParasiteBreakdownCellProps {
+  item: ShipmentItemRow;
+  editing: boolean;
+  showUnenteredAsOther: boolean;
+  onChange: (waspCount: number | null, flyCount: number | null, description: string) => void;
+}
+
+function ParasiteBreakdownCell({
+  item,
+  editing,
+  showUnenteredAsOther,
+  onChange,
+}: ParasiteBreakdownCellProps) {
+  const id = useId();
+  const otherCount = computeOtherParasiteCount(
+    item.parasite,
+    item.parasiteWaspCount,
+    item.parasiteFlyCount,
+  );
+  const isTracked = otherCount !== null;
+
+  const handleCountChange = (field: "wasp" | "fly", rawValue: string) => {
+    const value = rawValue === "" ? null : Number(rawValue);
+    if (value !== null && (!Number.isFinite(value) || value < 0 || !Number.isInteger(value))) {
+      return;
+    }
+
+    const waspCount = field === "wasp" ? value : item.parasiteWaspCount;
+    const flyCount = field === "fly" ? value : item.parasiteFlyCount;
+    onChange(waspCount, flyCount, item.parasiteDescription ?? "");
+  };
+
+  if (!editing) {
+    const waspCount = item.parasiteWaspCount ?? 0;
+    const flyCount = item.parasiteFlyCount ?? 0;
+    const displayOtherCount =
+      otherCount ?? (showUnenteredAsOther && item.parasite > 0 ? item.parasite : null);
+    const hasVisibleCount =
+      waspCount > 0 || flyCount > 0 || (displayOtherCount !== null && displayOtherCount > 0);
+
+    if (!hasVisibleCount && !item.parasiteDescription) {
+      return <span className="text-muted-foreground">—</span>;
+    }
+
+    return (
+      <div className="space-y-1">
+        {hasVisibleCount && (
+          <div className="space-y-1">
+            {waspCount > 0 && <div>Wasps: {waspCount}</div>}
+            {flyCount > 0 && <div>Flies: {flyCount}</div>}
+            {displayOtherCount !== null && displayOtherCount > 0 && (
+              <div>Other: {displayOtherCount}</div>
+            )}
+          </div>
+        )}
+        {item.parasiteDescription && (
+          <details className="group">
+            <summary className="text-primary hover:text-primary/80 inline-flex w-fit cursor-pointer list-none items-center gap-1 text-xs font-medium underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2">
+              <span>Description</span>
+              <ChevronDown
+                className="size-3 transition-transform group-open:rotate-180"
+                aria-hidden="true"
+              />
+            </summary>
+            <p className="mt-1 max-w-48 text-xs whitespace-pre-wrap">{item.parasiteDescription}</p>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <details className="group min-w-36">
+      <summary className="text-primary hover:text-primary/80 inline-flex w-fit cursor-pointer list-none items-center gap-1 text-sm font-medium underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2">
+        <span>{isTracked || item.parasiteDescription ? "Edit details" : "Add details"}</span>
+        <ChevronDown
+          className="size-4 transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="bg-background mt-2 min-w-52 space-y-3 rounded-md border p-3 shadow-md">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor={`${id}-wasp`} className="text-xs">
+              Wasps
+            </Label>
+            <Input
+              id={`${id}-wasp`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={Math.max(0, item.parasite - (item.parasiteFlyCount ?? 0))}
+              step={1}
+              value={item.parasiteWaspCount ?? ""}
+              aria-label={`Wasp count for ${item.commonName}`}
+              onChange={(event) => handleCountChange("wasp", event.target.value)}
+              className="h-8"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`${id}-fly`} className="text-xs">
+              Flies
+            </Label>
+            <Input
+              id={`${id}-fly`}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={Math.max(0, item.parasite - (item.parasiteWaspCount ?? 0))}
+              step={1}
+              value={item.parasiteFlyCount ?? ""}
+              aria-label={`Fly count for ${item.commonName}`}
+              onChange={(event) => handleCountChange("fly", event.target.value)}
+              className="h-8"
+            />
+          </div>
+        </div>
+        {isTracked ? (
+          <p className="text-muted-foreground text-xs">Other: {otherCount}</p>
+        ) : (
+          <p className="text-muted-foreground text-xs">Leave counts blank to skip the breakdown.</p>
+        )}
+        <div className="space-y-1">
+          <Label htmlFor={`${id}-description`} className="text-xs">
+            Description (optional)
+          </Label>
+          <Textarea
+            id={`${id}-description`}
+            maxLength={1000}
+            rows={2}
+            value={item.parasiteDescription ?? ""}
+            aria-label={`Parasite description for ${item.commonName}`}
+            onChange={(event) =>
+              onChange(item.parasiteWaspCount, item.parasiteFlyCount, event.target.value)
+            }
+            placeholder="Add details about the parasitoid"
+            className="min-h-16 resize-y text-sm"
+          />
+        </div>
+      </div>
+    </details>
   );
 }
 
