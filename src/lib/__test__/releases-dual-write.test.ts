@@ -202,6 +202,140 @@ describe("createReleaseFromShipment — good_emergence dual-write", () => {
   });
 });
 
+describe("createReleaseFromShipment — released_at date validation", () => {
+  const arrivalDate = new Date("2026-01-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-21T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("stores an explicitly backdated released_at and still applies the normal good_emergence delta", async () => {
+    const tx = setupTx();
+    const backdatedReleaseDate = new Date("2026-11-05T00:00:00.000Z");
+
+    mockSequence(tx.select, [
+      [{ id: SHIPMENT_ID, arrival_date: arrivalDate }],
+      [baseShipmentItemRow({ id: 101, good_emergence: 20 })],
+    ]);
+    const [releaseEventChain] = mockSequence(tx.insert, [
+      [
+        {
+          id: RELEASE_EVENT_ID,
+          shipmentId: SHIPMENT_ID,
+          releaseDate: backdatedReleaseDate,
+          releasedBy: "Tester",
+        },
+      ],
+      [{ id: 1, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 20 }],
+    ]);
+    const [updateItem101] = mockSequence(tx.update, [undefined]);
+
+    await createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+      released_at: backdatedReleaseDate,
+      items: [{ shipment_item_id: 101, quantity: 20 }],
+      loss_updates: [],
+    });
+
+    expect(releaseEventChain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ release_date: backdatedReleaseDate }),
+    );
+    expect(updateItem101.set).toHaveBeenCalledWith(expect.objectContaining({ good_emergence: 40 }));
+  });
+
+  it("rejects a released_at before the shipment's arrival date, before any write", async () => {
+    const tx = setupTx();
+
+    mockSequence(tx.select, [[{ id: SHIPMENT_ID, arrival_date: arrivalDate }]]);
+
+    await expect(
+      createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+        released_at: new Date("2025-12-31T00:00:00.000Z"),
+        items: [{ shipment_item_id: 101, quantity: 20 }],
+        loss_updates: [],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL);
+
+    expect(tx.insert).not.toHaveBeenCalled();
+    expect(tx.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a released_at in the future, before any write", async () => {
+    const tx = setupTx();
+
+    mockSequence(tx.select, [[{ id: SHIPMENT_ID, arrival_date: arrivalDate }]]);
+
+    await expect(
+      createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+        released_at: new Date("2026-11-22T00:00:00.000Z"),
+        items: [{ shipment_item_id: 101, quantity: 20 }],
+        loss_updates: [],
+      }),
+    ).rejects.toThrow(RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE);
+
+    expect(tx.insert).not.toHaveBeenCalled();
+    expect(tx.update).not.toHaveBeenCalled();
+  });
+
+  it("allows two independent historical release events on different dates for the same shipment", async () => {
+    const tx = setupTx();
+
+    mockSequence(tx.select, [
+      [{ id: SHIPMENT_ID, arrival_date: arrivalDate }],
+      [baseShipmentItemRow({ id: 101, good_emergence: 0 })],
+    ]);
+    mockSequence(tx.insert, [
+      [
+        {
+          id: RELEASE_EVENT_ID,
+          shipmentId: SHIPMENT_ID,
+          releaseDate: new Date("2026-11-05T00:00:00.000Z"),
+          releasedBy: "Tester",
+        },
+      ],
+      [{ id: 1, releaseEventId: RELEASE_EVENT_ID, shipmentItemId: 101, quantity: 10 }],
+    ]);
+    mockSequence(tx.update, [undefined]);
+
+    const first = await createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+      released_at: new Date("2026-11-05T00:00:00.000Z"),
+      items: [{ shipment_item_id: 101, quantity: 10 }],
+      loss_updates: [],
+    });
+    expect(first.event.id).toBe(RELEASE_EVENT_ID);
+
+    mockSequence(tx.select, [
+      [{ id: SHIPMENT_ID, arrival_date: arrivalDate }],
+      [baseShipmentItemRow({ id: 101, good_emergence: 10 })],
+    ]);
+    mockSequence(tx.insert, [
+      [
+        {
+          id: RELEASE_EVENT_ID + 1,
+          shipmentId: SHIPMENT_ID,
+          releaseDate: new Date("2026-02-01T00:00:00.000Z"),
+          releasedBy: "Tester",
+        },
+      ],
+      [{ id: 2, releaseEventId: RELEASE_EVENT_ID + 1, shipmentItemId: 101, quantity: 5 }],
+    ]);
+    const [updateItem101Second] = mockSequence(tx.update, [undefined]);
+
+    const second = await createReleaseFromShipment(INSTITUTION_ID, SHIPMENT_ID, "Tester", {
+      released_at: new Date("2026-02-01T00:00:00.000Z"),
+      items: [{ shipment_item_id: 101, quantity: 5 }],
+      loss_updates: [],
+    });
+    expect(second.event.id).toBe(RELEASE_EVENT_ID + 1);
+    expect(updateItem101Second.set).toHaveBeenCalledWith(
+      expect.objectContaining({ good_emergence: 15 }),
+    );
+  });
+});
+
 describe("updateReleaseEventItems — good_emergence dual-write", () => {
   const releaseEventRow = { id: RELEASE_EVENT_ID, shipmentId: SHIPMENT_ID };
 

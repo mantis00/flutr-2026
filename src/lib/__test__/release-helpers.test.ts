@@ -1,5 +1,6 @@
 import {
   assertGoodEmergenceTracked,
+  assertReleaseDateWithinBounds,
   applyGoodEmergenceDelta,
   calculateRemaining,
   computeCreateLossDelta,
@@ -240,5 +241,59 @@ describe("assertGoodEmergenceTracked + applyGoodEmergenceDelta composed (call or
     expect(() => applyGoodEmergenceDelta(assertGoodEmergenceTracked(3), -5)).toThrow(
       RELEASE_ERRORS.GOOD_EMERGENCE_UNDERFLOW,
     );
+  });
+});
+
+describe("assertReleaseDateWithinBounds", () => {
+  const arrivalDate = new Date("2026-01-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-21T15:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("accepts a release date on the shipment's arrival date (inclusive lower bound)", () => {
+    expect(() => assertReleaseDateWithinBounds(arrivalDate, arrivalDate)).not.toThrow();
+  });
+
+  it("accepts a release date between arrival and today", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-05T00:00:00.000Z"), arrivalDate),
+    ).not.toThrow();
+  });
+
+  it("accepts a release date of today, even near midnight UTC", () => {
+    jest.setSystemTime(new Date("2026-11-21T23:59:00.000Z"));
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-21T00:00:00.000Z"), arrivalDate),
+    ).not.toThrow();
+  });
+
+  it("rejects a release date before the shipment's arrival date", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2025-12-31T00:00:00.000Z"), arrivalDate),
+    ).toThrow(RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL);
+  });
+
+  it("rejects a release date in the future", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-22T00:00:00.000Z"), arrivalDate),
+    ).toThrow(RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE);
+  });
+
+  it("rejects an invalid (non-finite) release date", () => {
+    expect(() => assertReleaseDateWithinBounds(new Date("not-a-date"), arrivalDate)).toThrow(
+      RELEASE_ERRORS.INVALID_RELEASE_DATE,
+    );
+  });
+
+  it("compares by calendar day, ignoring a nonzero time-of-day on the arrival date", () => {
+    const arrivalWithTime = new Date("2026-01-01T18:00:00.000Z");
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-01-01T00:00:00.000Z"), arrivalWithTime),
+    ).not.toThrow();
   });
 });

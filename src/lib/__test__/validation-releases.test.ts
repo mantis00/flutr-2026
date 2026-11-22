@@ -165,6 +165,25 @@ describe("createReleaseFromShipmentSchema", () => {
     }
   });
 
+  it("accepts a plain YYYY-MM-DD released_at and normalizes it to UTC midnight", () => {
+    const result = createReleaseFromShipmentSchema.safeParse({
+      ...validBase(),
+      released_at: "2026-11-05",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.released_at?.toISOString()).toBe("2026-11-05T00:00:00.000Z");
+    }
+  });
+
+  it("leaves released_at undefined when omitted", () => {
+    const result = createReleaseFromShipmentSchema.safeParse({ items: validBase().items });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.released_at).toBeUndefined();
+    }
+  });
+
   it("rejects unparseable released_at strings", () => {
     const result = createReleaseFromShipmentSchema.safeParse({
       ...validBase(),

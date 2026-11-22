@@ -45,18 +45,6 @@ import {
 } from "@/components/tenant/shipments/types";
 import type { SpeciesImage } from "@/lib/wingspan/images";
 
-const releaseDateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "2-digit",
-  year: "numeric",
-});
-
-function formatReleaseDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "-";
-  return releaseDateFormatter.format(date);
-}
-
 type MetricKey =
   | "numberReceived"
   | "emergedInTransit"
@@ -567,7 +555,7 @@ export default function ShipmentDetailPage() {
                   {releases.map((release) => (
                     <TableRow key={release.id}>
                       <TableCell className="font-medium">
-                        {formatReleaseDate(release.releaseDate)}
+                        {formatDateOnlyForDisplay(release.releaseDate)}
                       </TableCell>
                       <TableCell>{release.releasedBy}</TableCell>
                       <TableCell className="text-right">{release.totalReleased}</TableCell>

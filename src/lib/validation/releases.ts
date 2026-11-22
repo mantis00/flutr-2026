@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+import { dateOnlyToUtcDate, extractDateOnly } from "@/lib/date-only";
+
+const releaseEventDateSchema = z
+  .string()
+  .transform((value) => extractDateOnly(value.trim()))
+  .refine((value): value is string => value !== null, {
+    message: "Expected a valid date in YYYY-MM-DD format",
+  })
+  .transform((value) => dateOnlyToUtcDate(value));
+
 const releaseItemSchema = z
   .object({
     shipment_item_id: z.coerce.number().int().positive(),
@@ -42,7 +52,7 @@ const releaseLossUpdateSchema = z
 
 export const createReleaseFromShipmentSchema = z
   .object({
-    released_at: z.coerce.date().optional(),
+    released_at: releaseEventDateSchema.optional(),
     items: z.array(releaseItemSchema).default([]),
     loss_updates: z.array(releaseLossUpdateSchema).optional().default([]),
   })

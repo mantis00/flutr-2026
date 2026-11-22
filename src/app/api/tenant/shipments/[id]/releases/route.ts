@@ -94,6 +94,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
         return invalidRequest(error.message);
       }
 
+      if (error.message === RELEASE_ERRORS.INVALID_RELEASE_DATE) {
+        return invalidRequest(error.message);
+      }
+
+      if (error.message === RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL) {
+        return invalidRequest(error.message);
+      }
+
+      if (error.message === RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE) {
+        return invalidRequest(error.message);
+      }
+
       if (error.message === RELEASE_ERRORS.SHIPMENT_NOT_FOUND) {
         return notFound(error.message);
       }
