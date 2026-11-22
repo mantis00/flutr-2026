@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/shared/date-picker";
-import { extractDateOnly, formatDateOnlyForDisplay } from "@/lib/date-only";
+import { extractDateOnly, formatDateOnlyForDisplay, utcTodayDateOnly } from "@/lib/date-only";
 import { ROUTES } from "@/lib/routes";
 
 import {
@@ -24,15 +24,6 @@ import {
   type ShipmentDetailResponse,
   type ShipmentItemRow,
 } from "@/components/tenant/shipments/types";
-
-/** Today's date in YYYY-MM-DD using the user's local timezone. */
-function todayYmd(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
 
 function sumCategories(values: CategoryQuantities[number] | undefined): number {
   if (!values) return 0;
@@ -53,7 +44,7 @@ export default function CreateReleasePage() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [values, setValues] = useState<CategoryQuantities>({});
-  const [eventDate, setEventDate] = useState(() => todayYmd());
+  const [eventDate, setEventDate] = useState(() => utcTodayDateOnly());
   const [submitting, setSubmitting] = useState(false);
 
   const tenantHeaders = useMemo(() => ({ "x-tenant-slug": slug }), [slug]);
@@ -252,7 +243,7 @@ export default function CreateReleasePage() {
           value={eventDate}
           onChange={setEventDate}
           minDate={extractDateOnly(data.shipment.arrivalDate) ?? undefined}
-          maxDate={todayYmd()}
+          maxDate={utcTodayDateOnly()}
           aria-describedby="event-date-hint"
         />
         <p id="event-date-hint" className="text-muted-foreground text-xs">

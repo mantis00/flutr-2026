@@ -38,6 +38,11 @@ export function utcStartOfDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
+/** Returns today's UTC calendar date as YYYY-MM-DD. */
+export function utcTodayDateOnly(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function extractDateOnly(value: string): string | null {
   const match = DATE_ONLY_OR_ISO_TIMESTAMP_PATTERN.exec(value);
   // A regex end anchor also matches before a final newline; require the entire input.
