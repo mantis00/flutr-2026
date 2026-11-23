@@ -17,6 +17,9 @@ jest.mock("@/lib/services/tenant-shipments", () => ({
       "This shipment item's Released total is historically untracked (NULL) and cannot be modified by a release operation",
     GOOD_EMERGENCE_UNDERFLOW:
       "Release would reduce good emergence below zero; adjust release quantities or shipment totals first",
+    INVALID_RELEASE_DATE: "Release date is invalid",
+    RELEASE_DATE_BEFORE_ARRIVAL: "Release date cannot be before the shipment's arrival date",
+    RELEASE_DATE_IN_FUTURE: "Release date cannot be in the future",
   },
   createTenantRelease: jest.fn(),
 }));
@@ -400,6 +403,70 @@ describe("Tenant Releases API", () => {
       ))!;
       expect(response.status).toBe(409);
       expect((await response.json()).error.code).toBe("CONFLICT");
+    });
+
+    it("returns 400 when released_at predates the shipment's arrival date", async () => {
+      mockCreateTenantRelease.mockRejectedValueOnce(
+        new Error(SHIPMENT_RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL),
+      );
+
+      const response = (await postReleaseFromShipment(
+        makePostShipmentReleaseRequest("55", validCreateReleasePayload(), SLUG),
+        shipmentRouteContext("55"),
+      ))!;
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+    });
+
+    it("returns 400 when released_at is in the future", async () => {
+      mockCreateTenantRelease.mockRejectedValueOnce(
+        new Error(SHIPMENT_RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE),
+      );
+
+      const response = (await postReleaseFromShipment(
+        makePostShipmentReleaseRequest("55", validCreateReleasePayload(), SLUG),
+        shipmentRouteContext("55"),
+      ))!;
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+    });
+
+    it("returns 400 when released_at is invalid", async () => {
+      mockCreateTenantRelease.mockRejectedValueOnce(
+        new Error(SHIPMENT_RELEASE_ERRORS.INVALID_RELEASE_DATE),
+      );
+
+      const response = (await postReleaseFromShipment(
+        makePostShipmentReleaseRequest("55", validCreateReleasePayload(), SLUG),
+        shipmentRouteContext("55"),
+      ))!;
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+    });
+
+    it("returns 201 and forwards a historical released_at to the service unchanged", async () => {
+      mockCreateTenantRelease.mockResolvedValueOnce({
+        event: {
+          id: 502,
+          shipmentId: 55,
+          releaseDate: "2026-11-05T00:00:00.000Z",
+          releasedBy: "Release Admin",
+        },
+        items: [{ id: 3, releaseEventId: 502, shipmentItemId: 101, quantity: 20 }],
+      });
+
+      const response = (await postReleaseFromShipment(
+        makePostShipmentReleaseRequest(
+          "55",
+          { ...validCreateReleasePayload(), released_at: "2026-11-05" },
+          SLUG,
+        ),
+        shipmentRouteContext("55"),
+      ))!;
+      expect(response.status).toBe(201);
+      expect(mockCreateTenantRelease).toHaveBeenCalledWith(
+        expect.objectContaining({ released_at: new Date("2026-11-05T00:00:00.000Z") }),
+      );
     });
 
     it("returns 201 on successful release creation", async () => {

@@ -1,11 +1,14 @@
 import {
   assertGoodEmergenceTracked,
+  assertReleaseDateWithinBounds,
   applyGoodEmergenceDelta,
   calculateRemaining,
   computeCreateLossDelta,
   computeDeleteLossRollbackPatch,
   RELEASE_ERRORS,
 } from "@/lib/queries/releases";
+import { createReleaseFromShipmentSchema } from "@/lib/validation/releases";
+import { utcTodayDateOnly } from "@/lib/date-only";
 
 const baseItem = {
   id: 1,
@@ -240,5 +243,154 @@ describe("assertGoodEmergenceTracked + applyGoodEmergenceDelta composed (call or
     expect(() => applyGoodEmergenceDelta(assertGoodEmergenceTracked(3), -5)).toThrow(
       RELEASE_ERRORS.GOOD_EMERGENCE_UNDERFLOW,
     );
+  });
+});
+
+describe("assertReleaseDateWithinBounds", () => {
+  const arrivalDate = new Date("2026-01-01T00:00:00.000Z");
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-21T15:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("accepts a release date on the shipment's arrival date (inclusive lower bound)", () => {
+    expect(() => assertReleaseDateWithinBounds(arrivalDate, arrivalDate)).not.toThrow();
+  });
+
+  it("accepts a release date between arrival and today", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-05T00:00:00.000Z"), arrivalDate),
+    ).not.toThrow();
+  });
+
+  it("accepts a release date of today, even near midnight UTC", () => {
+    jest.setSystemTime(new Date("2026-11-21T23:59:00.000Z"));
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-21T00:00:00.000Z"), arrivalDate),
+    ).not.toThrow();
+  });
+
+  it("rejects a release date before the shipment's arrival date", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2025-12-31T00:00:00.000Z"), arrivalDate),
+    ).toThrow(RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL);
+  });
+
+  it("rejects a release date in the future", () => {
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-11-22T00:00:00.000Z"), arrivalDate),
+    ).toThrow(RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE);
+  });
+
+  it("rejects an invalid (non-finite) release date", () => {
+    expect(() => assertReleaseDateWithinBounds(new Date("not-a-date"), arrivalDate)).toThrow(
+      RELEASE_ERRORS.INVALID_RELEASE_DATE,
+    );
+  });
+
+  it("compares by calendar day, ignoring a nonzero time-of-day on the arrival date", () => {
+    const arrivalWithTime = new Date("2026-01-01T18:00:00.000Z");
+    expect(() =>
+      assertReleaseDateWithinBounds(new Date("2026-01-01T00:00:00.000Z"), arrivalWithTime),
+    ).not.toThrow();
+  });
+});
+
+/**
+ * PR #155 follow-up: these tests exercise the actual Event date UI logic end
+ * to end — the exact `utcTodayDateOnly()` call the create-release page uses
+ * for both its default state and its DatePicker `maxDate` bound, fed through
+ * the real request schema and the real server-side bound check — rather
+ * than asserting on any one of those three in isolation. This is what
+ * previously would have caught the client/server timezone mismatch the
+ * reviewer found: `todayYmd()` (local time) and `assertReleaseDateWithinBounds`
+ * (UTC) were each individually "correct" but disagreed with each other.
+ */
+describe("Event date: client default/max feeds the server's own validation (not just the isolated helper)", () => {
+  const arrivalDate = new Date("2026-01-01T00:00:00.000Z");
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("the page's default Event date and its DatePicker maxDate are always the same value", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T22:00:00.000Z"));
+    // Mirrors release/new/page.tsx: useState(() => utcTodayDateOnly()) and
+    // maxDate={utcTodayDateOnly()} are two separate call sites sharing one function.
+    const eventDateDefault = utcTodayDateOnly();
+    const datePickerMaxDate = utcTodayDateOnly();
+    expect(eventDateDefault).toBe(datePickerMaxDate);
+  });
+
+  it("an untouched default submission at the reviewer's reproduction instant (22:00 UTC, PR #155) is accepted by the real schema and bound check", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T22:00:00.000Z"));
+
+    const eventDate = utcTodayDateOnly();
+    const parsed = createReleaseFromShipmentSchema.parse({
+      released_at: eventDate,
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+
+    expect(() => assertReleaseDateWithinBounds(parsed.released_at!, arrivalDate)).not.toThrow();
+  });
+
+  it("an untouched default submission just after UTC midnight is accepted by the real schema and bound check", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T00:05:00.000Z"));
+
+    const eventDate = utcTodayDateOnly();
+    const parsed = createReleaseFromShipmentSchema.parse({
+      released_at: eventDate,
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+
+    expect(() => assertReleaseDateWithinBounds(parsed.released_at!, arrivalDate)).not.toThrow();
+  });
+
+  it("a genuinely future date is still rejected by the real schema and bound check, regardless of instant", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T22:00:00.000Z"));
+
+    const parsed = createReleaseFromShipmentSchema.parse({
+      released_at: "2026-11-24",
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+
+    expect(() => assertReleaseDateWithinBounds(parsed.released_at!, arrivalDate)).toThrow(
+      RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE,
+    );
+  });
+
+  it("a valid historical date between arrival and today is still accepted", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T22:00:00.000Z"));
+
+    const parsed = createReleaseFromShipmentSchema.parse({
+      released_at: "2026-06-15",
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+
+    expect(() => assertReleaseDateWithinBounds(parsed.released_at!, arrivalDate)).not.toThrow();
+  });
+
+  it("a date before the shipment's arrival is still rejected", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-22T22:00:00.000Z"));
+
+    const parsed = createReleaseFromShipmentSchema.parse({
+      released_at: "2025-12-31",
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+
+    expect(() => assertReleaseDateWithinBounds(parsed.released_at!, arrivalDate)).toThrow(
+      RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL,
+    );
+  });
+
+  it("omitted released_at still parses to undefined, preserving the legacy always-now default", () => {
+    const parsed = createReleaseFromShipmentSchema.parse({
+      items: [{ shipment_item_id: 1, quantity: 1 }],
+    });
+    expect(parsed.released_at).toBeUndefined();
   });
 });

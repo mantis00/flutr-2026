@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { formatDateOnlyForDisplay } from "@/lib/date-only";
 import { ROUTES } from "@/lib/routes";
 
 import {
@@ -33,18 +34,6 @@ import type {
   ReleaseEventDetail,
   ShipmentDetailResponse,
 } from "@/components/tenant/shipments/types";
-
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "2-digit",
-  year: "numeric",
-});
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "—";
-  return dateFormatter.format(date);
-}
 
 export default function EditReleasePage() {
   const params = useParams<{ institution: string; id: string; releaseId: string }>();
@@ -357,8 +346,8 @@ export default function EditReleasePage() {
         </Button>
         <h1 className="text-3xl font-semibold">Edit release</h1>
         <p className="text-muted-foreground">
-          {shipment.shipment.supplierCode} · Released {formatDate(release.event.releaseDate)} by{" "}
-          {release.event.releasedBy}
+          {shipment.shipment.supplierCode} · Released{" "}
+          {formatDateOnlyForDisplay(release.event.releaseDate)} by {release.event.releasedBy}
         </p>
         <div className="mt-3">
           <Button

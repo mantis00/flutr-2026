@@ -719,13 +719,28 @@ Response shape:
 }
 ```
 
-- `released_at` is optional.
+- `released_at` is optional and sets the release event's date (`release_date`); when omitted, it
+  defaults to the current server time, with no range restriction.
+- When provided, `released_at` accepts either a plain `YYYY-MM-DD` date-only string or a full
+  ISO-8601 timestamp string (e.g. `2026-03-13T12:00:00.000Z`) — only the calendar-date portion of
+  an ISO timestamp is used; any time-of-day component is discarded, and the stored value is
+  normalized to UTC midnight of that calendar date. Any other string shape (including non-ISO
+  formats such as `March 13, 2026`) is rejected as a standard `400` validation error.
+- When provided, `released_at` must fall on or after the shipment's `arrival_date` and on or
+  before today, compared by UTC calendar day (not exact timestamp), so a same-day release is
+  never rejected due to time-of-day. Violating the lower bound returns `400` with
+  `RELEASE_DATE_BEFORE_ARRIVAL`; violating the upper bound returns `400` with
+  `RELEASE_DATE_IN_FUTURE`.
+- `released_at` applies to the release event as a whole — it is the same date whether the
+  payload is release-only (`items` only), loss-only (`loss_updates` only), or a combination of
+  both.
 - Create supports in-flight only, losses only, or mixed payloads.
 - At least one release item or at least one loss-update value is required.
 - `loss_updates` values are absolute shipment-item totals in create flow (not event deltas).
 - Decreasing an existing shipment-item loss total via create is rejected (`409 CONFLICT`).
 - Creating a release for an item whose `good_emergence` is `NULL` is rejected (`409 CONFLICT`).
 - Duplicate `shipment_item_id` values are rejected within `items` and within `loss_updates`.
+- An existing release's date cannot be changed via `PATCH` — only `items`/`losses` are editable.
 
 ### Tenant in-flight row contracts
 
