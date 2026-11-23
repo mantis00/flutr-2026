@@ -112,6 +112,13 @@ export default async function ShipmentsGuidePage({
             Leave a loss box at zero if it doesn&apos;t apply. Click <strong>Save shipment</strong>{" "}
             when the whole delivery is entered.
           </p>
+          <p>
+            When <strong>Parasite</strong> is greater than zero, you can optionally enter how many
+            were caused by wasps and flies. If you enter either count, the remaining parasitized
+            butterflies are shown as <strong>Other</strong>. Leave both blank to skip the breakdown.
+            Open <strong>Add parasite details</strong> to enter the counts or add an optional
+            species-specific description.
+          </p>
         </GuideStep>
 
         <GuideStep

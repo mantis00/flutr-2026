@@ -5,6 +5,7 @@ jest.mock("@/lib/services/tenant-shipments", () => ({
     CANNOT_DELETE_ITEM_IN_FLIGHT: "CANNOT_DELETE_ITEM_IN_FLIGHT",
     GOOD_EMERGENCE_EXCEEDS_AVAILABLE: "GOOD_EMERGENCE_EXCEEDS_AVAILABLE",
     INVALID_INVENTORY_REDUCTION: "INVALID_INVENTORY_REDUCTION",
+    PARASITE_BREAKDOWN_EXCEEDS_TOTAL: "PARASITE_BREAKDOWN_EXCEEDS_TOTAL",
     SHIPMENT_ITEM_NOT_FOUND: "SHIPMENT_ITEM_NOT_FOUND",
   },
   RELEASE_ERRORS: {
@@ -274,6 +275,33 @@ describe("Shipments API", () => {
       expect(mockCreateTenantShipment).not.toHaveBeenCalled();
     });
 
+    it("rejects parasitoid counts that exceed the parasite total", async () => {
+      const response = (await postShipment(
+        makePostRequest(
+          {
+            ...validCreatePayload(),
+            items: [
+              {
+                ...validCreatePayload().items[0],
+                parasite: 4,
+                parasite_wasp_count: 3,
+                parasite_fly_count: 2,
+              },
+            ],
+          },
+          SLUG,
+        ),
+      ))!;
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error.details).toContainEqual({
+        path: "items[0]",
+        message: "Wasp and fly counts cannot exceed the parasite total",
+      });
+      expect(mockCreateTenantShipment).not.toHaveBeenCalled();
+    });
+
     it("rejects a create payload that attempts to set good_emergence directly (security regression)", async () => {
       const payload = validCreatePayload();
       payload.items[0] = {
@@ -286,6 +314,29 @@ describe("Shipments API", () => {
       expect(response.status).toBe(400);
       expect((await response.json()).error.code).toBe("INVALID_REQUEST");
       expect(mockCreateTenantShipment).not.toHaveBeenCalled();
+    });
+
+    it("sanitizes an optional parasite description before calling the service", async () => {
+      const payload = validCreatePayload();
+      payload.items[0] = {
+        ...payload.items[0],
+        parasite: 2,
+        parasite_description: "  <b>Possible tachinid fly</b>  ",
+      } as unknown as (typeof payload.items)[0];
+      mockCreateTenantShipment.mockResolvedValueOnce(42);
+
+      const response = (await postShipment(makePostRequest(payload, SLUG)))!;
+
+      expect(response.status).toBe(201);
+      expect(mockCreateTenantShipment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          items: [
+            expect.objectContaining({
+              parasite_description: "Possible tachinid fly",
+            }),
+          ],
+        }),
+      );
     });
 
     it("rejects a create payload attempting to set good_emergence to null directly (security regression)", async () => {

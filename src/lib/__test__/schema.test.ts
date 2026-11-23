@@ -181,6 +181,9 @@ describe("schema", () => {
       expect(columns).toContain("damaged_in_transit");
       expect(columns).toContain("diseased_in_transit");
       expect(columns).toContain("parasite");
+      expect(columns).toContain("parasite_wasp_count");
+      expect(columns).toContain("parasite_fly_count");
+      expect(columns).toContain("parasite_description");
       expect(columns).toContain("non_emergence");
       expect(columns).toContain("poor_emergence");
       expect(columns).toContain("created_at");

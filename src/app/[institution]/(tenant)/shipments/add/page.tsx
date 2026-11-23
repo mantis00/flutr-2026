@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Bug, Minus, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Bug, ChevronDown, Minus, Plus, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -26,7 +26,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { computeOtherParasiteCount, normalizeParasiteBreakdown } from "@/lib/parasite-breakdown";
 
 import { ROUTES } from "@/lib/routes";
 
@@ -50,6 +52,9 @@ type ShipmentItemForm = {
   damaged_in_transit: number;
   diseased_in_transit: number;
   parasite: number;
+  parasite_wasp_count: number | null;
+  parasite_fly_count: number | null;
+  parasite_description: string;
   non_emergence: number;
   poor_emergence: number;
 };
@@ -108,6 +113,9 @@ function blankItem(species: SpeciesPickerOption): ShipmentItemForm {
     damaged_in_transit: 0,
     diseased_in_transit: 0,
     parasite: 0,
+    parasite_wasp_count: null,
+    parasite_fly_count: null,
+    parasite_description: "",
     non_emergence: 0,
     poor_emergence: 0,
   };
@@ -232,6 +240,40 @@ export default function AddShipmentPage() {
     }
   }, []);
 
+  const updateParasiteCount = useCallback(
+    (id: number, field: "parasite_wasp_count" | "parasite_fly_count", rawValue: string) => {
+      setItems((current) =>
+        current.map((item) => {
+          if (item.butterfly_species_id !== id) return item;
+          const value = rawValue === "" ? null : Number(rawValue);
+          if (
+            value !== null &&
+            (!Number.isFinite(value) || value < 0 || !Number.isInteger(value))
+          ) {
+            return item;
+          }
+
+          const otherCount =
+            field === "parasite_wasp_count"
+              ? (item.parasite_fly_count ?? 0)
+              : (item.parasite_wasp_count ?? 0);
+          const max = Math.max(0, item.parasite - otherCount);
+          const count = value === null ? null : Math.min(value, max);
+          return { ...item, [field]: count };
+        }),
+      );
+    },
+    [],
+  );
+
+  const updateParasiteDescription = useCallback((id: number, description: string) => {
+    setItems((current) =>
+      current.map((item) =>
+        item.butterfly_species_id === id ? { ...item, parasite_description: description } : item,
+      ),
+    );
+  }, []);
+
   const removeItem = useCallback((id: number) => {
     setItems((current) => current.filter((item) => item.butterfly_species_id !== id));
     setFieldErrors((prev) => {
@@ -275,6 +317,13 @@ export default function AddShipmentPage() {
     const hasReceivedErrors = Object.keys(errors.receivedByItemId).length > 0;
     if (hasReceivedErrors) {
       issues.push("a received count above zero on every species");
+    }
+    if (
+      items.some(
+        (item) => (item.parasite_wasp_count ?? 0) + (item.parasite_fly_count ?? 0) > item.parasite,
+      )
+    ) {
+      issues.push("wasp and fly counts within each parasite total");
     }
 
     if (issues.length === 0) return null;
@@ -322,27 +371,25 @@ export default function AddShipmentPage() {
           supplier_code: supplierCode,
           shipment_date: shipmentDate,
           arrival_date: arrivalDate,
-          items: items.map(
-            ({
-              butterfly_species_id,
-              number_received,
-              emerged_in_transit,
-              damaged_in_transit,
-              diseased_in_transit,
-              parasite,
-              non_emergence,
-              poor_emergence,
-            }) => ({
-              butterfly_species_id,
-              number_received,
-              emerged_in_transit,
-              damaged_in_transit,
-              diseased_in_transit,
-              parasite,
-              non_emergence,
-              poor_emergence,
-            }),
-          ),
+          items: items.map((item) => {
+            const parasiteBreakdown = normalizeParasiteBreakdown(
+              item.parasite_wasp_count,
+              item.parasite_fly_count,
+            );
+            return {
+              butterfly_species_id: item.butterfly_species_id,
+              number_received: item.number_received,
+              emerged_in_transit: item.emerged_in_transit,
+              damaged_in_transit: item.damaged_in_transit,
+              diseased_in_transit: item.diseased_in_transit,
+              parasite: item.parasite,
+              parasite_wasp_count: parasiteBreakdown.waspCount,
+              parasite_fly_count: parasiteBreakdown.flyCount,
+              parasite_description: item.parasite_description.trim() || null,
+              non_emergence: item.non_emergence,
+              poor_emergence: item.poor_emergence,
+            };
+          }),
         }),
       });
       const result = await response.json().catch(() => null);
@@ -516,6 +563,100 @@ export default function AddShipmentPage() {
                           />
                         ))}
                       </div>
+                      <details className="group w-fit">
+                        <summary className="text-primary hover:text-primary/80 marker:text-muted-foreground inline-flex cursor-pointer list-none items-center gap-1 text-sm font-medium underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2">
+                          <span>
+                            {item.parasite_wasp_count !== null ||
+                            item.parasite_fly_count !== null ||
+                            item.parasite_description
+                              ? "Edit parasite details"
+                              : "Add parasite details (optional)"}
+                          </span>
+                          <ChevronDown
+                            className="size-4 transition-transform group-open:rotate-180"
+                            aria-hidden="true"
+                          />
+                        </summary>
+                        <div className="bg-background mt-2 max-w-sm space-y-3 rounded-md border p-3 shadow-md">
+                          <div className="grid max-w-xs grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label htmlFor={`parasite-wasps-${item.butterfly_species_id}`}>
+                                Wasps
+                              </Label>
+                              <Input
+                                id={`parasite-wasps-${item.butterfly_species_id}`}
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                max={Math.max(0, item.parasite - (item.parasite_fly_count ?? 0))}
+                                step={1}
+                                value={item.parasite_wasp_count ?? ""}
+                                onChange={(event) =>
+                                  updateParasiteCount(
+                                    item.butterfly_species_id,
+                                    "parasite_wasp_count",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor={`parasite-flies-${item.butterfly_species_id}`}>
+                                Flies
+                              </Label>
+                              <Input
+                                id={`parasite-flies-${item.butterfly_species_id}`}
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                max={Math.max(0, item.parasite - (item.parasite_wasp_count ?? 0))}
+                                step={1}
+                                value={item.parasite_fly_count ?? ""}
+                                onChange={(event) =>
+                                  updateParasiteCount(
+                                    item.butterfly_species_id,
+                                    "parasite_fly_count",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+                          {computeOtherParasiteCount(
+                            item.parasite,
+                            item.parasite_wasp_count,
+                            item.parasite_fly_count,
+                          ) !== null && (
+                            <p className="text-muted-foreground text-xs">
+                              Other:{" "}
+                              {computeOtherParasiteCount(
+                                item.parasite,
+                                item.parasite_wasp_count,
+                                item.parasite_fly_count,
+                              )}
+                            </p>
+                          )}
+                          <div className="space-y-1">
+                            <Label htmlFor={`parasite-description-${item.butterfly_species_id}`}>
+                              Description (optional)
+                            </Label>
+                            <Textarea
+                              id={`parasite-description-${item.butterfly_species_id}`}
+                              maxLength={1000}
+                              rows={2}
+                              value={item.parasite_description}
+                              onChange={(event) =>
+                                updateParasiteDescription(
+                                  item.butterfly_species_id,
+                                  event.target.value,
+                                )
+                              }
+                              placeholder="Add species-specific details"
+                              className="resize-y text-sm"
+                            />
+                          </div>
+                        </div>
+                      </details>
                       {receivedInvalid && (
                         <p className="text-destructive text-xs">Received must be greater than 0.</p>
                       )}

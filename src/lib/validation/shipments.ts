@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { dateOnlyToUtcDate, extractDateOnly } from "@/lib/date-only";
+import { sanitizeText } from "@/lib/validation/sanitize";
 import { paginatedQuerySchema } from "./pagination";
 
 /**
@@ -40,6 +41,8 @@ type ShipmentItemAccountingInput = {
   damaged_in_transit: number;
   diseased_in_transit: number;
   parasite: number;
+  parasite_wasp_count?: number | null;
+  parasite_fly_count?: number | null;
   non_emergence: number;
   poor_emergence: number;
 };
@@ -65,6 +68,24 @@ function validateLossesWithinReceived(
   }
 }
 
+function validateParasiteBreakdownWithinTotal(
+  item: ShipmentItemAccountingInput,
+  ctx: z.RefinementCtx,
+): void {
+  const waspCount = item.parasite_wasp_count ?? 0;
+  const flyCount = item.parasite_fly_count ?? 0;
+  if (
+    (item.parasite_wasp_count != null || item.parasite_fly_count != null) &&
+    waspCount + flyCount > item.parasite
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Wasp and fly counts cannot exceed the parasite total",
+      path: [],
+    });
+  }
+}
+
 // Deliberately has no `good_emergence` field: this schema validates untrusted input for the
 // public manual shipment create/add-item routes, and `.strict()` rejects any unrecognized key
 // outright. Widening it to accept `good_emergence` would let any tenant user with ordinary
@@ -80,11 +101,17 @@ const shipmentItemCreateSchema = z
     damaged_in_transit: z.number().int().min(0).default(0),
     diseased_in_transit: z.number().int().min(0).default(0),
     parasite: z.number().int().min(0).default(0),
+    parasite_wasp_count: z.number().int().min(0).nullable().optional(),
+    parasite_fly_count: z.number().int().min(0).nullable().optional(),
+    parasite_description: z.string().max(1000).transform(sanitizeText).nullable().optional(),
     non_emergence: z.number().int().min(0).default(0),
     poor_emergence: z.number().int().min(0).default(0),
   })
   .strict()
-  .superRefine(validateLossesWithinReceived);
+  .superRefine((item, ctx) => {
+    validateLossesWithinReceived(item, ctx);
+    validateParasiteBreakdownWithinTotal(item, ctx);
+  });
 
 const shipmentDateOnlySchema = z
   .string()
@@ -150,11 +177,17 @@ const shipmentItemUpdateSchema = z
     damaged_in_transit: z.number().int().min(0),
     diseased_in_transit: z.number().int().min(0),
     parasite: z.number().int().min(0),
+    parasite_wasp_count: z.number().int().min(0).nullable().optional(),
+    parasite_fly_count: z.number().int().min(0).nullable().optional(),
+    parasite_description: z.string().max(1000).transform(sanitizeText).nullable().optional(),
     non_emergence: z.number().int().min(0),
     poor_emergence: z.number().int().min(0),
   })
   .strict()
-  .superRefine(validateLossesWithinReceived);
+  .superRefine((item, ctx) => {
+    validateLossesWithinReceived(item, ctx);
+    validateParasiteBreakdownWithinTotal(item, ctx);
+  });
 
 /**
  * ---------------------------

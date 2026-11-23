@@ -338,6 +338,9 @@ export const shipment_items = pgTable(
     damaged_in_transit: integer("damaged_in_transit").notNull().default(0),
     diseased_in_transit: integer("diseased_in_transit").notNull().default(0),
     parasite: integer("parasite").notNull().default(0),
+    parasite_wasp_count: integer("parasite_wasp_count"),
+    parasite_fly_count: integer("parasite_fly_count"),
+    parasite_description: text("parasite_description"),
     non_emergence: integer("non_emergence").notNull().default(0),
     poor_emergence: integer("poor_emergence").notNull().default(0),
     good_emergence: integer("good_emergence").default(0),
@@ -355,6 +358,16 @@ export const shipment_items = pgTable(
     ck_shipment_items_good_emergence_nonnegative: check(
       "ck_shipment_items_good_emergence_nonnegative",
       sql`${table.good_emergence} >= 0`,
+    ),
+    ck_shipment_items_parasite_breakdown_within_total: check(
+      "ck_shipment_items_parasite_breakdown_within_total",
+      sql`(${table.parasite_wasp_count} is null or ${table.parasite_wasp_count} >= 0)
+        and (${table.parasite_fly_count} is null or ${table.parasite_fly_count} >= 0)
+        and (
+          (${table.parasite_wasp_count} is null and ${table.parasite_fly_count} is null)
+          or coalesce(${table.parasite_wasp_count}, 0)::bigint
+            + coalesce(${table.parasite_fly_count}, 0)::bigint <= ${table.parasite}
+        )`,
     ),
 
     // Lookup shipment items by institution + species (gallery/home aggregation)
