@@ -1,4 +1,8 @@
-import { computeOtherParasiteCount, normalizeParasiteBreakdown } from "@/lib/parasite-breakdown";
+import {
+  computeCategorizedParasiteCount,
+  computeOtherParasiteCount,
+  normalizeParasiteBreakdown,
+} from "@/lib/parasite-breakdown";
 
 describe("parasite breakdown", () => {
   it("keeps an unentered breakdown untracked instead of assuming Other", () => {
@@ -18,6 +22,11 @@ describe("parasite breakdown", () => {
 
   it("derives Other from the total after entered wasp and fly counts", () => {
     expect(computeOtherParasiteCount(4, 1, 1)).toBe(2);
+  });
+
+  it("uses only categorized counts as the parasite metric minimum", () => {
+    expect(computeCategorizedParasiteCount(null, null)).toBe(0);
+    expect(computeCategorizedParasiteCount(2, 3)).toBe(5);
   });
 
   it("treats explicit zero counts as a tracked breakdown", () => {

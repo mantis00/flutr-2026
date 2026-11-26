@@ -14,6 +14,13 @@ export function normalizeParasiteBreakdown(
   return { waspCount: waspCount ?? 0, flyCount: flyCount ?? 0 };
 }
 
+export function computeCategorizedParasiteCount(
+  waspCount: number | null,
+  flyCount: number | null,
+): number {
+  return (waspCount ?? 0) + (flyCount ?? 0);
+}
+
 export function computeOtherParasiteCount(
   total: number,
   waspCount: number | null,

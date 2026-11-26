@@ -32,7 +32,10 @@ import {
 } from "@/components/shared/species-search-toolbar";
 import { useSpeciesSearch, type SpeciesItem } from "@/hooks/use-species-search";
 import { cn } from "@/lib/utils";
-import { computeOtherParasiteCount } from "@/lib/parasite-breakdown";
+import {
+  computeCategorizedParasiteCount,
+  computeOtherParasiteCount,
+} from "@/lib/parasite-breakdown";
 
 import {
   computeItemEditReserve,
@@ -117,15 +120,8 @@ function metricMaxFor(item: ShipmentItemRow, field: MetricKey): number | undefin
 }
 
 function metricMinFor(item: ShipmentItemRow, field: MetricKey): number {
-  if (field === "parasite") {
-    const otherLosses = LOSS_FIELDS.filter((key) => key !== "parasite").reduce(
-      (acc, key) => acc + item[key],
-      0,
-    );
-    const inventoryMinimum = computeItemEditReserve(item) + otherLosses;
-    const categorizedMinimum = (item.parasiteWaspCount ?? 0) + (item.parasiteFlyCount ?? 0);
-    return Math.max(inventoryMinimum, categorizedMinimum);
-  }
+  if (field === "parasite")
+    return computeCategorizedParasiteCount(item.parasiteWaspCount, item.parasiteFlyCount);
   if (field !== "numberReceived") return 0;
   const totalLosses = LOSS_FIELDS.reduce((acc, k) => acc + item[k], 0);
   return computeItemEditReserve(item) + totalLosses;
@@ -171,11 +167,6 @@ export function ShipmentItemsTable({
           item.parasiteFlyCount !== null ||
           Boolean(item.parasiteDescription?.trim())),
     );
-  const hasShipmentBreakdownCounts = items.some(
-    (item) =>
-      item.parasite > 0 && (item.parasiteWaspCount !== null || item.parasiteFlyCount !== null),
-  );
-
   return (
     <div className="space-y-4">
       <SpeciesSearchToolbar
@@ -267,7 +258,6 @@ export function ShipmentItemsTable({
                       <ParasiteBreakdownCell
                         item={item}
                         editing={editing}
-                        showUnenteredAsOther={hasShipmentBreakdownCounts}
                         onChange={(waspCount, flyCount, description) =>
                           onParasiteBreakdownChange?.(item.id, waspCount, flyCount, description)
                         }
@@ -362,16 +352,10 @@ export function ShipmentItemsTable({
 interface ParasiteBreakdownCellProps {
   item: ShipmentItemRow;
   editing: boolean;
-  showUnenteredAsOther: boolean;
   onChange: (waspCount: number | null, flyCount: number | null, description: string) => void;
 }
 
-function ParasiteBreakdownCell({
-  item,
-  editing,
-  showUnenteredAsOther,
-  onChange,
-}: ParasiteBreakdownCellProps) {
+function ParasiteBreakdownCell({ item, editing, onChange }: ParasiteBreakdownCellProps) {
   const id = useId();
   const otherCount = computeOtherParasiteCount(
     item.parasite,
@@ -394,10 +378,8 @@ function ParasiteBreakdownCell({
   if (!editing) {
     const waspCount = item.parasiteWaspCount ?? 0;
     const flyCount = item.parasiteFlyCount ?? 0;
-    const displayOtherCount =
-      otherCount ?? (showUnenteredAsOther && item.parasite > 0 ? item.parasite : null);
     const hasVisibleCount =
-      waspCount > 0 || flyCount > 0 || (displayOtherCount !== null && displayOtherCount > 0);
+      waspCount > 0 || flyCount > 0 || (otherCount !== null && otherCount > 0);
 
     if (!hasVisibleCount && !item.parasiteDescription) {
       return <span className="text-muted-foreground">—</span>;
@@ -409,9 +391,7 @@ function ParasiteBreakdownCell({
           <div className="space-y-1">
             {waspCount > 0 && <div>Wasps: {waspCount}</div>}
             {flyCount > 0 && <div>Flies: {flyCount}</div>}
-            {displayOtherCount !== null && displayOtherCount > 0 && (
-              <div>Other: {displayOtherCount}</div>
-            )}
+            {otherCount !== null && otherCount > 0 && <div>Other: {otherCount}</div>}
           </div>
         )}
         {item.parasiteDescription && (
