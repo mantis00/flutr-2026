@@ -160,8 +160,17 @@ export function ShipmentItemsTable({
             {search.results.map((item) => {
               const remaining = computeItemRemaining(item);
               return (
-                <li key={item.id} className="bg-card flex flex-col gap-4 rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center gap-3">
+                <li
+                  key={item.id}
+                  className="bg-card @container flex flex-col gap-4 rounded-lg border p-4"
+                >
+                  {/*
+                    Header grid driven by the card's own width (container query),
+                    not the viewport, since the sidebar changes how much room a
+                    card gets. Narrow: image / name / remove on row one, stats on
+                    row two. Wide (@lg): everything on a single row.
+                  */}
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 @lg:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
                     <div className="bg-muted relative size-16 shrink-0 overflow-hidden rounded">
                       {item.images[0] ? (
                         <Image
@@ -176,13 +185,13 @@ export function ShipmentItemsTable({
                         <Bug className="text-muted-foreground absolute inset-0 m-auto size-7" />
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
                       <div className="truncate text-base font-medium">{item.commonName}</div>
                       <div className="text-muted-foreground truncate text-sm italic">
                         {item.scientificName}
                       </div>
                     </div>
-                    <dl className="flex shrink-0 gap-2">
+                    <dl className="order-last col-span-3 flex gap-2 @lg:order-none @lg:col-span-1">
                       <div className="bg-muted min-w-16 rounded-md px-3 py-1.5 text-center">
                         <dt className="text-muted-foreground text-xs font-medium">Released</dt>
                         <dd className="text-lg leading-tight font-semibold">
@@ -239,11 +248,11 @@ export function ShipmentItemsTable({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
-                    {METRIC_COLUMNS.map((col) => (
-                      <div key={col.key} className="space-y-1">
-                        <div className="text-xs font-medium">{col.short}</div>
-                        {editing ? (
+                  {editing ? (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
+                      {METRIC_COLUMNS.map((col) => (
+                        <div key={col.key} className="space-y-1">
+                          <div className="text-xs font-medium">{col.short}</div>
                           <MetricStepper
                             value={item[col.key]}
                             min={metricMinFor(item, col.key)}
@@ -251,12 +260,22 @@ export function ShipmentItemsTable({
                             ariaLabel={`${col.label} for ${item.commonName}`}
                             onChange={(next) => onMetricChange?.(item.id, col.key, next)}
                           />
-                        ) : (
-                          <div className="text-sm">{item[col.key]}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <dl className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
+                      {METRIC_COLUMNS.map((col) => (
+                        <div key={col.key} className="space-y-1">
+                          <dt className="text-xs font-medium">
+                            <span aria-hidden="true">{col.short}</span>
+                            <span className="sr-only">{col.label}</span>
+                          </dt>
+                          <dd className="text-sm">{item[col.key]}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
                 </li>
               );
             })}
