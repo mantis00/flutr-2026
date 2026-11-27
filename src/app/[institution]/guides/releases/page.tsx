@@ -70,8 +70,18 @@ export default async function ReleasesGuidePage({
 
         <GuideStep title="Save the release">
           <p>
-            Click <strong>Save release</strong>. Flutr records today&apos;s date as the release date
-            and your name as the person who released them — there is nothing extra to fill in.
+            Check the <strong>Event date</strong> at the top of the page before saving. It defaults
+            to today, but you can pick an earlier date if you are entering a release that was not
+            recorded on the day it happened. The earliest date allowed is the shipment&apos;s
+            arrival date, and you cannot pick a date in the future.
+          </p>
+          <p>
+            Click <strong>Save release</strong>. Flutr records the Event date you selected as the
+            release date and your name as the person who released them.
+          </p>
+          <p>
+            Always enter the date the release actually happened, even when you are recording it late
+            — that keeps your release history and public counts accurate.
           </p>
         </GuideStep>
 

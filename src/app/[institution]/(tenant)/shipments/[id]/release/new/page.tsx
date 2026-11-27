@@ -6,7 +6,9 @@ import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDateOnlyForDisplay } from "@/lib/date-only";
+import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/shared/date-picker";
+import { extractDateOnly, formatDateOnlyForDisplay, utcTodayDateOnly } from "@/lib/date-only";
 import { ROUTES } from "@/lib/routes";
 
 import {
@@ -42,6 +44,7 @@ export default function CreateReleasePage() {
   const [status, setStatus] = useState<"idle" | "loading" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [values, setValues] = useState<CategoryQuantities>({});
+  const [eventDate, setEventDate] = useState(() => utcTodayDateOnly());
   const [submitting, setSubmitting] = useState(false);
 
   const tenantHeaders = useMemo(() => ({ "x-tenant-slug": slug }), [slug]);
@@ -165,6 +168,7 @@ export default function CreateReleasePage() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...tenantHeaders },
         body: JSON.stringify({
+          released_at: eventDate,
           items: releaseItems,
           ...(lossUpdates.length > 0 ? { loss_updates: lossUpdates } : {}),
         }),
@@ -231,6 +235,22 @@ export default function CreateReleasePage() {
           {errorMessage}
         </div>
       )}
+
+      <div className="max-w-xs space-y-2">
+        <Label htmlFor="event-date">Event date</Label>
+        <DatePicker
+          id="event-date"
+          value={eventDate}
+          onChange={setEventDate}
+          minDate={extractDateOnly(data.shipment.arrivalDate) ?? undefined}
+          maxDate={utcTodayDateOnly()}
+          aria-describedby="event-date-hint"
+        />
+        <p id="event-date-hint" className="text-muted-foreground text-xs">
+          When this release and any losses below actually happened. Pick an earlier date to record
+          one that was missed at the time.
+        </p>
+      </div>
 
       <Card>
         <CardHeader>

@@ -11,7 +11,8 @@ function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
 }
 
 function SheetTrigger({ ...props }: React.ComponentProps<typeof SheetPrimitive.Trigger>) {
-  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
+  // Radix points aria-controls at content it unmounts while closed; see dialog.tsx.
+  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} aria-controls={undefined} />;
 }
 
 function SheetClose({ ...props }: React.ComponentProps<typeof SheetPrimitive.Close>) {

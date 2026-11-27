@@ -13,7 +13,7 @@ export function InstitutionDataProvider({
   institution,
   children,
 }: {
-  institution: PublicInstitution;
+  institution: PublicInstitution | null;
   children: React.ReactNode;
 }) {
   return (

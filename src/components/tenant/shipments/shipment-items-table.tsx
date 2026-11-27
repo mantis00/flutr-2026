@@ -17,14 +17,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   SpeciesSearchToolbar,
   type SpeciesFilters,
 } from "@/components/shared/species-search-toolbar";
@@ -157,100 +149,85 @@ export function ShipmentItemsTable({
         onReset={search.resetAll}
       />
 
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[280px]">Species</TableHead>
-              {METRIC_COLUMNS.map((col) => (
-                <TableHead key={col.key} className="text-center">
-                  {col.short}
-                </TableHead>
-              ))}
-              <TableHead className="text-center">Released</TableHead>
-              <TableHead className="text-center">Remaining</TableHead>
-              {editing && <TableHead className="w-[60px]" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {search.results.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={METRIC_COLUMNS.length + (editing ? 4 : 3)}
-                  className="text-muted-foreground py-6 text-center text-sm"
+      {/* One wrapping card per species (mirrors the add-shipment form). */}
+      <div>
+        {search.results.length === 0 ? (
+          <p className="text-muted-foreground py-6 text-center text-sm">
+            No species in this shipment.
+          </p>
+        ) : (
+          <ul className="grid gap-4">
+            {search.results.map((item) => {
+              const remaining = computeItemRemaining(item);
+              return (
+                <li
+                  key={item.id}
+                  className="bg-card @container flex flex-col gap-4 rounded-lg border p-4"
                 >
-                  No species in this shipment.
-                </TableCell>
-              </TableRow>
-            ) : (
-              search.results.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="bg-muted relative size-16 shrink-0 overflow-hidden rounded">
-                        {item.images[0] ? (
-                          <Image
-                            src={item.images[0].thumb}
-                            alt=""
-                            width={128}
-                            height={128}
-                            unoptimized
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          <Bug className="text-muted-foreground absolute inset-0 m-auto size-6" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{item.commonName}</div>
-                        <div className="text-muted-foreground truncate text-xs italic">
-                          {item.scientificName}
-                        </div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  {METRIC_COLUMNS.map((col) => (
-                    <TableCell key={col.key} className="text-center">
-                      {editing ? (
-                        <MetricStepper
-                          value={item[col.key]}
-                          min={metricMinFor(item, col.key)}
-                          max={metricMaxFor(item, col.key)}
-                          ariaLabel={`${col.label} for ${item.commonName}`}
-                          onChange={(next) => onMetricChange?.(item.id, col.key, next)}
+                  {/*
+                    Header grid driven by the card's own width (container query),
+                    not the viewport, since the sidebar changes how much room a
+                    card gets. Narrow: image / name / remove on row one, stats on
+                    row two. Wide (@lg): everything on a single row.
+                  */}
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 @lg:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+                    <div className="bg-muted relative size-16 shrink-0 overflow-hidden rounded">
+                      {item.images[0] ? (
+                        <Image
+                          src={item.images[0].thumb}
+                          alt=""
+                          width={128}
+                          height={128}
+                          unoptimized
+                          className="size-full object-cover"
                         />
                       ) : (
-                        <span className="text-sm">{item[col.key]}</span>
+                        <Bug className="text-muted-foreground absolute inset-0 m-auto size-7" />
                       )}
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-center text-sm">
-                    {formatReleasedQuantity(item.goodEmergence)}
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "text-center text-sm font-medium",
-                      computeItemRemaining(item) === 0 && "text-emerald-600",
-                    )}
-                  >
-                    {computeItemRemaining(item) === 0 ? (
-                      <span className="inline-flex items-center justify-center gap-1">
-                        <CheckCircle2 className="size-4" aria-hidden="true" />
-                        <span>0</span>
-                        <span className="sr-only"> (none remaining)</span>
-                      </span>
-                    ) : (
-                      computeItemRemaining(item)
-                    )}
-                  </TableCell>
-                  {editing && (
-                    <TableCell className="text-right">
-                      {/*
-                        Items that already have released butterflies cannot be
-                        removed — the release would lose its source row.
-                        Disabling here matches the server-side
-                        `CANNOT_DELETE_ITEM_IN_FLIGHT` rejection.
-                      */}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-base font-medium">{item.commonName}</div>
+                      <div className="text-muted-foreground truncate text-sm italic">
+                        {item.scientificName}
+                      </div>
+                    </div>
+                    <dl className="order-last col-span-3 flex gap-2 @lg:order-none @lg:col-span-1">
+                      <div className="bg-muted min-w-16 rounded-md px-3 py-1.5 text-center">
+                        <dt className="text-muted-foreground text-xs font-medium">Released</dt>
+                        <dd className="text-lg leading-tight font-semibold">
+                          {formatReleasedQuantity(item.goodEmergence)}
+                        </dd>
+                      </div>
+                      <div
+                        className={cn(
+                          "min-w-16 rounded-md px-3 py-1.5 text-center",
+                          remaining === 0
+                            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+                            : "bg-muted",
+                        )}
+                      >
+                        <dt
+                          className={cn(
+                            "text-xs font-medium",
+                            remaining !== 0 && "text-muted-foreground",
+                          )}
+                        >
+                          Remaining
+                        </dt>
+                        <dd className="text-lg leading-tight font-semibold">
+                          {remaining === 0 ? (
+                            <span className="inline-flex items-center gap-1">
+                              <CheckCircle2 className="size-4" aria-hidden="true" />
+                              <span>0</span>
+                              <span className="sr-only"> (none remaining)</span>
+                            </span>
+                          ) : (
+                            remaining
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                    {editing && (
                       <Button
                         type="button"
                         size="icon"
@@ -268,13 +245,42 @@ export function ShipmentItemsTable({
                       >
                         <Trash2 className="size-4" />
                       </Button>
-                    </TableCell>
+                    )}
+                  </div>
+
+                  {editing ? (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
+                      {METRIC_COLUMNS.map((col) => (
+                        <div key={col.key} className="space-y-1">
+                          <div className="text-xs font-medium">{col.short}</div>
+                          <MetricStepper
+                            value={item[col.key]}
+                            min={metricMinFor(item, col.key)}
+                            max={metricMaxFor(item, col.key)}
+                            ariaLabel={`${col.label} for ${item.commonName}`}
+                            onChange={(next) => onMetricChange?.(item.id, col.key, next)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <dl className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
+                      {METRIC_COLUMNS.map((col) => (
+                        <div key={col.key} className="space-y-1">
+                          <dt className="text-xs font-medium">
+                            <span aria-hidden="true">{col.short}</span>
+                            <span className="sr-only">{col.label}</span>
+                          </dt>
+                          <dd className="text-sm">{item[col.key]}</dd>
+                        </div>
+                      ))}
+                    </dl>
                   )}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <AlertDialog

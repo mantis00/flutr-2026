@@ -151,7 +151,7 @@ export function ReleaseCategoryComposer({ items, values, onChange }: ReleaseCate
           No butterflies are available to release in this shipment.
         </div>
       ) : (
-        <ul className="grid gap-3">
+        <ul className="grid gap-3 [&_button]:scroll-mt-24 [&_input]:scroll-mt-24">
           {search.visibleResults.map((item) => {
             const itemValues = values[item.id];
             const allocatedAcrossCategories = sumValues(itemValues);

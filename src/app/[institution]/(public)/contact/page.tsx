@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Mail, Phone, MapPin, Globe, Heart, HandHelping, ExternalLink } from "lucide-react";
 
@@ -23,7 +24,8 @@ export async function generateMetadata({ params }: ContactPageProps): Promise<Me
 
 export default async function ContactPage({ params }: ContactPageProps) {
   const { institution: slug } = await params;
-  const inst = (await getPublicInstitution(slug))!;
+  const inst = await getPublicInstitution(slug);
+  if (!inst) notFound();
 
   const socials = inst.social_links as PublicInstitution["social_links"];
   const websiteUrl = normalizeExternalHttpUrl(inst.website_url);

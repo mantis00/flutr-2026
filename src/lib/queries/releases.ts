@@ -1,6 +1,7 @@
 import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db";
+import { utcStartOfDay } from "@/lib/date-only";
 import {
   in_flight,
   release_event_losses,
@@ -36,6 +37,9 @@ export const RELEASE_ERRORS = {
     "This shipment item's Released total is historically untracked (NULL) and cannot be modified by a release operation",
   GOOD_EMERGENCE_UNDERFLOW:
     "Release would reduce good emergence below zero; adjust release quantities or shipment totals first",
+  INVALID_RELEASE_DATE: "Release date is invalid",
+  RELEASE_DATE_BEFORE_ARRIVAL: "Release date cannot be before the shipment's arrival date",
+  RELEASE_DATE_IN_FUTURE: "Release date cannot be in the future",
 } as const;
 
 type LockedShipmentItem = {
@@ -138,6 +142,31 @@ export function applyGoodEmergenceDelta(current: number, delta: number): number 
     throw new Error(RELEASE_ERRORS.GOOD_EMERGENCE_UNDERFLOW);
   }
   return next;
+}
+
+/**
+ * Validates an explicitly-submitted release date against the shipment's
+ * arrival date and today, by calendar day (UTC), so a same-day release near
+ * midnight is never rejected by a stray time-of-day difference. Only called
+ * when a caller explicitly supplies `released_at` — an omitted value keeps
+ * defaulting to `new Date()` with no bound, preserving prior behavior.
+ */
+export function assertReleaseDateWithinBounds(releaseDate: Date, arrivalDate: Date): void {
+  if (Number.isNaN(releaseDate.getTime())) {
+    throw new Error(RELEASE_ERRORS.INVALID_RELEASE_DATE);
+  }
+
+  const releaseDay = utcStartOfDay(releaseDate);
+  const arrivalDay = utcStartOfDay(arrivalDate);
+  const today = utcStartOfDay(new Date());
+
+  if (releaseDay.getTime() < arrivalDay.getTime()) {
+    throw new Error(RELEASE_ERRORS.RELEASE_DATE_BEFORE_ARRIVAL);
+  }
+
+  if (releaseDay.getTime() > today.getTime()) {
+    throw new Error(RELEASE_ERRORS.RELEASE_DATE_IN_FUTURE);
+  }
 }
 
 function isPositiveInteger(value: unknown): value is number {
@@ -884,13 +913,17 @@ export async function createReleaseFromShipment(
 
   return db.transaction(async (tx) => {
     const [shipment] = await tx
-      .select({ id: shipments.id })
+      .select({ id: shipments.id, arrival_date: shipments.arrival_date })
       .from(shipments)
       .where(and(eq(shipments.id, shipmentId), eq(shipments.institution_id, institutionId)))
       .limit(1);
 
     if (!shipment) {
       throw new Error(RELEASE_ERRORS.SHIPMENT_NOT_FOUND);
+    }
+
+    if (payload.released_at !== undefined) {
+      assertReleaseDateWithinBounds(payload.released_at, shipment.arrival_date);
     }
 
     // Lock the union of items touched by the release + the loss updates so

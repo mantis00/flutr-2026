@@ -26,8 +26,14 @@ const FAQS = [
       "Butterflies leave the public count automatically once their lifespan has elapsed since their release date. You can adjust a species' lifespan on the Butterflies page.",
   },
   {
-    question: "Placeholder — more questions to come.",
-    answer: "This section will be filled in as questions come in from institution staff.",
+    question: "Why can't I see the Data tab?",
+    answer:
+      "Importing and exporting historical records is an Admin-only capability. If you're an Employee, ask an Admin at your institution to do the import, or to change your role if you need it regularly.",
+  },
+  {
+    question: "Can I safely import the same file again?",
+    answer:
+      "Yes, as long as the Data tab's Duplicate headers setting is left on its default, Skip duplicates: Flutr recognizes a shipment it already has (matched by supplier, ship date, and arrival date) and skips it automatically — it won't be duplicated or overwritten. If you fixed a mistake in your file and some rows already imported successfully, re-running the same file is the normal way to pick up where it left off. Switching that setting to Allow duplicates turns this protection off and will create duplicate shipments instead.",
   },
 ];
 

@@ -140,3 +140,13 @@
     cursor: pointer;
   }
 }
+
+/* Every focus ring here is a Tailwind `ring-*`, i.e. a box-shadow, which Windows high contrast
+   mode drops — leaving no visible focus. Unlayered so it outranks the `outline-none` utilities
+   the components pair their rings with. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+}

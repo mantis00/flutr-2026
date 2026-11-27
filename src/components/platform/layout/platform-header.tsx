@@ -55,7 +55,7 @@ export default function PlatformHeader({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <header role="banner" className="bg-background flex h-14 shrink-0 items-center border-b px-6">
+    <header className="bg-background flex h-14 shrink-0 items-center border-b px-6">
       <div className="flex min-w-0 flex-1 items-center justify-between gap-6">
         <div className="flex items-center gap-3">
           <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
