@@ -69,6 +69,7 @@ const sampleNews = {
   content: "Come visit us this spring!",
   image_url: null,
   is_active: true,
+  show_on_homepage: false,
   created_at: new Date("2026-03-01T00:00:00.000Z"),
   updated_at: new Date("2026-03-01T00:00:00.000Z"),
 };
@@ -300,6 +301,36 @@ describe("News API", () => {
       expect(mockUpdateTenantNewsEntry).toHaveBeenCalledWith(
         expect.objectContaining({ id: 1, slug: SLUG, title: "Updated Title" }),
       );
+    });
+
+    it("allows selecting an active entry for the homepage", async () => {
+      mockUpdateTenantNewsEntry.mockResolvedValueOnce({
+        ...sampleNews,
+        show_on_homepage: true,
+      });
+
+      const response = (await patchNews(
+        makePatchRequest("1", { show_on_homepage: true }, SLUG),
+        routeContext("1"),
+      ))!;
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).news.show_on_homepage).toBe(true);
+      expect(mockUpdateTenantNewsEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, slug: SLUG, show_on_homepage: true }),
+      );
+    });
+
+    it("returns conflict when attempting to select an inactive entry", async () => {
+      mockUpdateTenantNewsEntry.mockRejectedValueOnce(new Error("CONFLICT"));
+
+      const response = (await patchNews(
+        makePatchRequest("1", { show_on_homepage: true }, SLUG),
+        routeContext("1"),
+      ))!;
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe("CONFLICT");
     });
 
     it("can toggle is_active independently", async () => {

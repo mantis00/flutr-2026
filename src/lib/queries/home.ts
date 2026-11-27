@@ -76,7 +76,25 @@ export const getPublicNewsPreview = cache(async (institutionId: number) => {
     .where(
       and(eq(institution_news.institution_id, institutionId), eq(institution_news.is_active, true)),
     )
-    .orderBy(desc(institution_news.created_at))
+    .orderBy(desc(institution_news.show_on_homepage), desc(institution_news.created_at))
     .limit(1);
   return row ?? null;
+});
+
+/** All active news entries for the institution homepage, newest first. */
+export const getPublicNewsEntries = cache(async (institutionId: number) => {
+  return db
+    .select({
+      id: institution_news.id,
+      title: institution_news.title,
+      content: institution_news.content,
+      image_url: institution_news.image_url,
+      created_at: institution_news.created_at,
+      show_on_homepage: institution_news.show_on_homepage,
+    })
+    .from(institution_news)
+    .where(
+      and(eq(institution_news.institution_id, institutionId), eq(institution_news.is_active, true)),
+    )
+    .orderBy(desc(institution_news.created_at));
 });

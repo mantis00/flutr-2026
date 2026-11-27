@@ -136,7 +136,7 @@ pnpm db:studio      # Open Drizzle Studio GUI
 ## Database Tables
 
 - `institutions` — Multi-tenant organizations (slug, name, optional main_header, full address fields, IABES membership, stats_active flag, theming, contact info, timestamps). `main_header` overrides the default public homepage headline when set.
-- `institution_news` — Institution-specific news entries (institution_id, title, content, is_active, optional image_url, timestamps)
+- `institution_news` — Institution-specific news entries (institution_id, title, content, is_active, show_on_homepage, optional image_url, timestamps). At most one active entry per institution can override the public homepage's newest-first default; hidden or deleted selections fall back to the newest remaining active entry. The homepage's View all modal lists every active entry newest first.
 - `users` — User accounts tied to an institution (name, globally unique email, password_hash, role, institution_id, timestamps)
 - `butterfly_species` — Global master species catalog (scientific_name, common_name, family, sub_family, lifespan_days, range, optional description, host_plant, habitat, fun_facts, timestamps). Imagery lives in the Wingspan microservice, matched on `scientific_name` — the legacy `img_wings_open` / `img_wings_closed` / `extra_img_1` / `extra_img_2` columns still exist but are no longer read or written.
 - `butterfly_species_institution` — Institution-specific overrides for global species (butterfly_species_id, institution_id, optional common_name_override, lifespan_override, timestamps). A row also marks the species as carried by that institution, which is what the public gallery lists. Edited at `/[institution]/butterflies`.

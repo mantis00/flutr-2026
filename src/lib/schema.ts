@@ -84,7 +84,8 @@ export const institutions = pgTable("institutions", {
  * Institution News
  *
  * Supports multiple news entries per institution.
- * Front page will display the most recent active entry.
+ * The homepage displays the most recent active entry unless one active entry
+ * is explicitly selected to override it.
  *
  * Future-proof:
  * - Allows archiving
@@ -105,6 +106,7 @@ export const institution_news = pgTable(
     image_url: text("image_url"),
 
     is_active: boolean("is_active").notNull().default(true),
+    show_on_homepage: boolean("show_on_homepage").notNull().default(false),
 
     created_at: timestamp("created_at").defaultNow().notNull(),
     updated_at: timestamp("updated_at").defaultNow().notNull(),
@@ -113,6 +115,13 @@ export const institution_news = pgTable(
     // Tenant-scoped lookups (active news for an institution)
     idx_institution_news_institution_id: index("idx_institution_news_institution_id").on(
       table.institution_id,
+    ),
+    idx_institution_news_homepage: uniqueIndex("idx_institution_news_homepage")
+      .on(table.institution_id)
+      .where(sql`${table.show_on_homepage} = true`),
+    institution_news_homepage_active_check: check(
+      "institution_news_homepage_active_check",
+      sql`not ${table.show_on_homepage} or ${table.is_active}`,
     ),
   }),
 );

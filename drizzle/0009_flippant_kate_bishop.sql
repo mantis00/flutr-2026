@@ -1,0 +1,3 @@
+ALTER TABLE "institution_news" ADD COLUMN "show_on_homepage" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_institution_news_homepage" ON "institution_news" USING btree ("institution_id") WHERE "institution_news"."show_on_homepage" = true;--> statement-breakpoint
+ALTER TABLE "institution_news" ADD CONSTRAINT "institution_news_homepage_active_check" CHECK (not "institution_news"."show_on_homepage" or "institution_news"."is_active");

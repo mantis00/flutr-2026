@@ -70,6 +70,7 @@ describe("schema", () => {
       expect(columns).toContain("title");
       expect(columns).toContain("content");
       expect(columns).toContain("is_active");
+      expect(columns).toContain("show_on_homepage");
       expect(columns).toContain("created_at");
       expect(columns).toContain("updated_at");
     });

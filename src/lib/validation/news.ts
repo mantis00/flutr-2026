@@ -19,6 +19,7 @@ export const updateNewsSchema = z
     content: z.string().min(1).max(10000).transform(sanitizeText).optional(),
     image_url: z.string().trim().url().transform(sanitizeText).optional(),
     is_active: z.boolean().optional(),
+    show_on_homepage: z.boolean().optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -26,7 +27,8 @@ export const updateNewsSchema = z
       data.title === undefined &&
       data.content === undefined &&
       data.image_url === undefined &&
-      data.is_active === undefined
+      data.is_active === undefined &&
+      data.show_on_homepage === undefined
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

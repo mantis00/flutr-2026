@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { logger } from "@/lib/logger";
 import {
   forbidden,
+  conflict,
   internalError,
   invalidRequest,
   notFound,
@@ -45,6 +46,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (error.message === "UNAUTHORIZED") return unauthorized();
       if (error.message === "FORBIDDEN") return forbidden();
       if (error.message === "NOT_FOUND") return notFound("News entry not found");
+      if (error.message === "CONFLICT") {
+        return conflict("Only active news entries can be selected for the homepage");
+      }
     }
 
     const tenantError = handleTenantError(error);
