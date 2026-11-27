@@ -44,18 +44,29 @@ export default async function NewsGuidePage({
           </p>
         </GuideStep>
 
+        <GuideStep title="Choose the homepage feature">
+          <p>
+            In the <strong>All entries</strong> table, turn on <strong>Homepage</strong> for one
+            active entry to feature it in the public homepage news section. Selecting another entry
+            moves the feature to it. If none is selected, the newest active entry appears. Hiding or
+            deleting the selected entry returns the homepage to the newest remaining active entry.
+          </p>
+        </GuideStep>
+
         <GuideStep
           title="See where it appears"
           shot={{
             src: "/docs/guides/news-public.webp",
             alt: "The public homepage with a published news entry annotated",
             caption:
-              "Your news post appears part-way down the public homepage, with its image, date and a Show more link for longer posts.",
+              "Your featured news post appears part-way down the public homepage, with its image, date and a Show more link for longer posts.",
           }}
         >
           <p>
-            Visible entries show up in the news section of your public homepage, newest first. Use{" "}
-            <strong>View Public Site</strong> in the header to check how it looks.
+            The homepage shows your selected entry, or the newest active entry when none is
+            selected. When multiple entries are active, visitors can open <strong>View all</strong>{" "}
+            to browse them newest first. Use <strong>View Public Site</strong> in the header to
+            check how it looks.
           </p>
         </GuideStep>
 

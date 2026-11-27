@@ -7,6 +7,7 @@ jest.mock("@/lib/queries/institution", () => ({
 jest.mock("@/lib/queries/home", () => ({
   getInstitutionHomeData: jest.fn(),
   getPublicNewsPreview: jest.fn(),
+  getPublicNewsEntries: jest.fn(),
 }));
 
 jest.mock("@/lib/services/butterfly-of-the-day", () => ({
@@ -65,13 +66,18 @@ jest.mock("@/components/shared/stats/region-distribution-panel", () => ({
 import InstitutionPage from "@/app/[institution]/(public)/page";
 import StatsPage from "@/app/[institution]/(public)/stats/page";
 import { getPublicInstitution } from "@/lib/queries/institution";
-import { getInstitutionHomeData, getPublicNewsPreview } from "@/lib/queries/home";
+import {
+  getInstitutionHomeData,
+  getPublicNewsPreview,
+  getPublicNewsEntries,
+} from "@/lib/queries/home";
 import { getButterflyOfTheDay } from "@/lib/services/butterfly-of-the-day";
 import { getStatsData, transformStatsData } from "@/lib/queries/stats";
 
 const mockGetPublicInstitution = getPublicInstitution as jest.Mock;
 const mockGetInstitutionHomeData = getInstitutionHomeData as jest.Mock;
 const mockGetPublicNewsPreview = getPublicNewsPreview as jest.Mock;
+const mockGetPublicNewsEntries = getPublicNewsEntries as jest.Mock;
 const mockGetButterflyOfTheDay = getButterflyOfTheDay as jest.Mock;
 const mockGetStatsData = getStatsData as jest.Mock;
 const mockTransformStatsData = transformStatsData as jest.Mock;
@@ -125,6 +131,7 @@ describe("Butterfly of the Day pages", () => {
       in_flight_count: 2,
     });
     mockGetPublicNewsPreview.mockResolvedValueOnce(null);
+    mockGetPublicNewsEntries.mockResolvedValueOnce([]);
 
     await InstitutionPage({
       params: Promise.resolve({ institution: "reiman-gardens" }),

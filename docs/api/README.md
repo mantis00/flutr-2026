@@ -566,7 +566,10 @@ that release. It is intentionally independent of the shipment's aggregate
 
 - `title` and `content` are required. `image_url` and `is_active` are optional.
 
-`PATCH /api/tenant/news/[id]` body shape: any subset of `title`, `content`, `image_url`, `is_active`.
+`PATCH /api/tenant/news/[id]` body shape: any subset of `title`, `content`, `image_url`,
+`is_active`, `show_on_homepage`. Only active entries may be selected for the homepage; selecting
+one clears the previous selection for that institution. Hiding or deleting the selected entry
+clears the override, so the newest active entry is shown instead.
 
 Response shape for list:
 
@@ -580,6 +583,7 @@ Response shape for list:
       "content": "...",
       "image_url": null,
       "is_active": true,
+      "show_on_homepage": false,
       "created_at": "...",
       "updated_at": "..."
     }
@@ -598,6 +602,7 @@ Response shape for create/update:
     "content": "...",
     "image_url": null,
     "is_active": true,
+    "show_on_homepage": false,
     "created_at": "...",
     "updated_at": "..."
   }

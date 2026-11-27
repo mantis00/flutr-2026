@@ -72,6 +72,7 @@ PostgreSQL 17 managed via Drizzle ORM:
 - **Butterfly Species** — Global scientific reference data. Photos come from the Wingspan microservice, matched on `scientific_name`.
 - **Butterfly Species Institution** — Institution-specific species overrides (common name, lifespan)
 - **Supplier** — Global butterfly vendor/supplier code used by shipments and imports
+- **Institution News** — Active news entries appear in a newest-first homepage modal; one active entry can be selected to override the homepage preview, otherwise the newest active entry is shown
 - **Shipment** — A butterfly shipment record with quality/damage tracking metrics. Each item's `good_emergence` is the authoritative aggregate for shipment Released summaries and per-item displays, Remaining/completion, and release capacity. `NULL` means the historical Released total is unknown, not zero; it intentionally reads as zero Remaining/complete.
 - **Release Event** — A release workflow event linked to a shipment (`release_date`, `released_by`)
 - **In Flight** — Event-level released quantities per shipment item, recorded per release event. `in_flight` remains authoritative for release-event history, per-event quantities, current/live tracking, and physical event safeguards. It may legitimately differ from aggregate `good_emergence`; release mutations apply signed deltas without recomputing either value from the other.

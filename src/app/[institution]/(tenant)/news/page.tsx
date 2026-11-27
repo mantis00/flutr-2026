@@ -71,6 +71,7 @@ interface NewsEntry {
   content: string;
   image_url: string | null;
   is_active: boolean;
+  show_on_homepage: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -367,6 +368,42 @@ export default function NewsPage() {
     }
   };
 
+  const handleToggleHomepage = async (entry: NewsEntry) => {
+    setBusyId(entry.id);
+    try {
+      const res = await fetch(ROUTES.tenant.newsEntryApi(entry.id), {
+        method: "PATCH",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ show_on_homepage: !entry.show_on_homepage }),
+      });
+      if (!res.ok) {
+        const result = await res.json().catch(() => null);
+        toast.error(result?.error?.message ?? "Failed to update homepage news.");
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      const updated = data.news as NewsEntry;
+      setEntries((prev) =>
+        prev.map((current) =>
+          current.id === updated.id
+            ? updated
+            : updated.show_on_homepage
+              ? { ...current, show_on_homepage: false }
+              : current,
+        ),
+      );
+      toast.success(
+        updated.show_on_homepage
+          ? `${updated.title} will appear on the homepage.`
+          : "The newest active entry will appear on the homepage.",
+      );
+    } catch {
+      toast.error("Failed to update homepage news.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const confirmDelete = async () => {
     if (deleteTargetId === null) return;
     const id = deleteTargetId;
@@ -418,7 +455,9 @@ export default function NewsPage() {
       <Card>
         <CardHeader>
           <CardTitle>All entries</CardTitle>
-          <CardDescription>Sorted by date created, newest first.</CardDescription>
+          <CardDescription>
+            Newest first. Select one active entry to override the homepage news.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {status === "loading" ? (
@@ -452,6 +491,7 @@ export default function NewsPage() {
                   <TableRow>
                     <TableHead>Title</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Homepage</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -464,6 +504,14 @@ export default function NewsPage() {
                         <Badge variant={entry.is_active ? "default" : "outline"}>
                           {entry.is_active ? "Active" : "Hidden"}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={entry.show_on_homepage}
+                          onCheckedChange={() => void handleToggleHomepage(entry)}
+                          disabled={!entry.is_active || busyId !== null}
+                          aria-label={`Show ${entry.title} on homepage`}
+                        />
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(entry.created_at)}

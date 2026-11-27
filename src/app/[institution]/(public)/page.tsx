@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublicInstitution } from "@/lib/queries/institution";
-import { getInstitutionHomeData, getPublicNewsPreview } from "@/lib/queries/home";
+import {
+  getInstitutionHomeData,
+  getPublicNewsEntries,
+  getPublicNewsPreview,
+} from "@/lib/queries/home";
 import { getButterflyOfTheDay } from "@/lib/services/butterfly-of-the-day";
 import { HeroSection } from "@/components/public/home/hero-section";
 import { FeaturedButterfly } from "@/components/public/home/featured-butterfly";
@@ -56,10 +60,10 @@ export default async function InstitutionPage({ params }: InstitutionPageProps) 
 
   const basePath = `/${slug}`;
 
-  const [{ totalButterflies, totalSpecies }, featured, news] = await Promise.all([
+  const [{ totalButterflies, totalSpecies }, featured, newsEntries] = await Promise.all([
     getInstitutionHomeData(inst.id),
     getButterflyOfTheDay(inst.id),
-    getPublicNewsPreview(inst.id),
+    getPublicNewsEntries(inst.id),
   ]);
 
   const primaryColor = inst.theme_colors?.[0] ?? "#a78bfa"; // Light purple default
@@ -93,7 +97,7 @@ export default async function InstitutionPage({ params }: InstitutionPageProps) 
           )}
 
           <div className="flex flex-col gap-8">
-            {news && <NewsSection {...news} />}
+            {newsEntries.length > 0 && <NewsSection entries={newsEntries} />}
             <ExploreLinks basePath={basePath} />
           </div>
         </div>
